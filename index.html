@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>PickleQueue — Open Play</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#10150f">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root{
+    --bg:#10150f; --card:#1b231a; --card2:#242f22; --line:#33402f;
+    --ink:#eef3ea; --dim:#93a08c; --accent:#c3f53c; --accent-ink:#1a2404;
+    --teamA:#5fd4f5; --teamB:#ffb85c; --danger:#ff7a6e; --win:#8de08a;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0;}
+  body{background:var(--bg); color:var(--ink); font-family:-apple-system,'Segoe UI',Roboto,sans-serif; padding-bottom:80px;}
+  h1,h2,h3{margin:0;}
+  button{font-family:inherit; border:none; border-radius:10px; cursor:pointer; font-size:15px;}
+  input{font-family:inherit; font-size:16px; background:var(--card2); border:1px solid var(--line); color:var(--ink); border-radius:10px; padding:10px 12px; outline:none;}
+  input:focus{border-color:var(--accent);}
+  .wrap{max-width:560px; margin:0 auto; padding:14px;}
+  header.top{display:flex; align-items:center; justify-content:space-between; padding:14px 14px 4px; max-width:560px; margin:0 auto;}
+  header.top h1{font-size:20px; letter-spacing:.3px;}
+  header.top h1 span{color:var(--accent);}
+  .subtle{color:var(--dim); font-size:13px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px;}
+  .btn{background:var(--card2); color:var(--ink); padding:10px 14px;}
+  .btn.primary{background:var(--accent); color:var(--accent-ink); font-weight:700;}
+  .btn.ghost{background:transparent; color:var(--dim); border:1px solid var(--line);}
+  .btn.danger{background:transparent; color:var(--danger); border:1px solid var(--line);}
+  .btn.small{padding:6px 10px; font-size:13px; border-radius:8px;}
+  .row{display:flex; gap:8px; align-items:center;}
+  .row .grow{flex:1;}
+  /* tabs */
+  nav.tabs{position:fixed; bottom:0; left:0; right:0; background:#151b14; border-top:1px solid var(--line); display:flex; z-index:20;}
+  nav.tabs button{flex:1; background:none; color:var(--dim); padding:12px 0 max(12px, env(safe-area-inset-bottom)); font-size:13px; border-radius:0;}
+  nav.tabs button.on{color:var(--accent); font-weight:700;}
+  /* court */
+  .court{border:1px solid var(--line); border-radius:14px; margin-bottom:12px; overflow:hidden;}
+  .court .head{display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--card2); font-size:13px; color:var(--dim);}
+  .court .head b{color:var(--ink); font-size:15px;}
+  .court .body{padding:12px 14px; background:var(--card);}
+  .badge{font-size:11px; padding:3px 8px; border-radius:99px; background:var(--card); border:1px solid var(--line);}
+  .badge.play{color:var(--accent); border-color:var(--accent);}
+  .badge.stage{color:var(--teamB); border-color:var(--teamB);}
+  .teams{display:flex; align-items:stretch; gap:8px;}
+  .team{flex:1; border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:8px;}
+  .team.a{background:rgba(95,212,245,.08); border:1px solid rgba(95,212,245,.35);}
+  .team.b{background:rgba(255,184,92,.08); border:1px solid rgba(255,184,92,.35);}
+  .team .tname{font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--dim); text-align:center;}
+  .vs{align-self:center; color:var(--dim); font-size:12px; font-weight:700;}
+  .chip{background:var(--card2); border:1px solid var(--line); border-radius:10px; padding:10px 10px; text-align:center; font-size:15px; font-weight:600; user-select:none; touch-action:none; position:relative;}
+  .chip small{display:block; font-weight:400; color:var(--dim); font-size:11px; margin-top:1px;}
+  .chip.sel{outline:2px solid var(--accent); outline-offset:1px;}
+  .chip.drophint{outline:2px dashed var(--accent); outline-offset:1px;}
+  .chip.ghost{position:fixed; z-index:99; pointer-events:none; opacity:.9; width:130px; box-shadow:0 8px 24px rgba(0,0,0,.5);}
+  .court .actions{display:flex; gap:8px; margin-top:12px;}
+  .court .actions .btn{flex:1;}
+  .empty-court{color:var(--dim); font-size:14px; text-align:center; padding:8px 0;}
+  .timer{font-variant-numeric:tabular-nums; color:var(--accent); font-weight:700;}
+  /* queue */
+  .qitem{display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid var(--line);}
+  .qitem:last-child{border-bottom:none;}
+  .qpos{width:24px; height:24px; border-radius:50%; background:var(--card2); color:var(--dim); font-size:12px; display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0;}
+  .qitem.next .qpos{background:var(--accent); color:var(--accent-ink);}
+  .qname{flex:1; font-weight:600;}
+  .qname .meta{font-weight:400; color:var(--dim); font-size:12px;}
+  .tag{font-size:11px; padding:2px 7px; border-radius:99px; border:1px solid var(--line); color:var(--dim);}
+  .tag.w{color:var(--win); border-color:var(--win);}
+  .tag.zz{color:var(--teamB); border-color:var(--teamB);}
+  .hint{color:var(--dim); font-size:12.5px; line-height:1.5; margin-top:10px;}
+  /* players table */
+  table{width:100%; border-collapse:collapse; font-size:14px;}
+  th{color:var(--dim); font-weight:600; font-size:12px; text-align:left; padding:6px 4px; border-bottom:1px solid var(--line);}
+  td{padding:8px 4px; border-bottom:1px solid var(--line);}
+  tr:last-child td{border-bottom:none;}
+  .st{font-size:11px; padding:2px 7px; border-radius:99px; border:1px solid var(--line); color:var(--dim); white-space:nowrap;}
+  .st.playing{color:var(--accent); border-color:var(--accent);}
+  .st.break{color:var(--teamB); border-color:var(--teamB);}
+  /* log */
+  .match{padding:10px 4px; border-bottom:1px solid var(--line); font-size:14px; line-height:1.5;}
+  .match:last-child{border-bottom:none;}
+  .match .who{font-weight:600;}
+  .match .score{color:var(--accent); font-weight:700;}
+  .match .meta{color:var(--dim); font-size:12px;}
+  /* setup */
+  .plist{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;}
+  .ptag{background:var(--card2); border:1px solid var(--line); border-radius:99px; padding:7px 12px; font-size:14px; display:flex; gap:8px; align-items:center;}
+  .ptag b{font-weight:600;}
+  .ptag .x{color:var(--danger); font-weight:700; cursor:pointer; padding:0 2px;}
+  label.lbl{display:block; color:var(--dim); font-size:13px; margin:14px 0 6px;}
+  /* modal */
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,.65); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px;}
+  .modal{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; width:100%; max-width:420px;}
+  .modal h3{margin-bottom:4px;}
+  .scorerow{display:flex; gap:10px; align-items:center; margin:14px 0;}
+  .scorerow input{width:100%; text-align:center; font-size:20px; font-weight:700;}
+  .winbtns{display:flex; gap:10px;}
+  .winbtns .btn{flex:1; padding:14px 8px; font-weight:700;}
+  .winbtns .wa{background:rgba(95,212,245,.15); color:var(--teamA); border:1px solid var(--teamA);}
+  .winbtns .wb{background:rgba(255,184,92,.15); color:var(--teamB); border:1px solid var(--teamB);}
+  .toast{position:fixed; bottom:76px; left:50%; transform:translateX(-50%); background:var(--card2); border:1px solid var(--line); color:var(--ink); padding:10px 16px; border-radius:99px; font-size:13.5px; z-index:60; box-shadow:0 6px 20px rgba(0,0,0,.4); white-space:nowrap;}
+  .hidden{display:none !important;}
+  /* motion */
+  @keyframes fade{from{opacity:0}}
+  @keyframes pop{from{opacity:0; transform:scale(.92) translateY(10px)}}
+  @keyframes toastup{from{opacity:0; transform:translate(-50%,12px)}}
+  @keyframes winpulse{0%{box-shadow:0 0 0 0 rgba(141,224,138,.6)}100%{box-shadow:0 0 0 16px rgba(141,224,138,0)}}
+  .overlay{animation:fade .18s ease}
+  .modal{animation:pop .22s cubic-bezier(.2,.8,.2,1)}
+  .toast{animation:toastup .25s cubic-bezier(.2,.8,.2,1)}
+  .team.winflash{border-color:var(--win); animation:winpulse .5s ease}
+  .team.winflash .chip{border-color:var(--win)}
+  /* finish session */
+  .holdbtn{position:relative; overflow:hidden; width:100%; padding:14px; background:var(--card2); color:var(--danger); border:1px solid var(--danger); border-radius:12px; font-weight:700; touch-action:none; user-select:none;}
+  .holdbtn .fill{position:absolute; inset:0; width:0; background:rgba(255,122,110,.28); transition:width .15s;}
+  .holdbtn.arming .fill{width:100%; transition:width 1.2s linear;}
+  .holdbtn .txt{position:relative;}
+  @media (prefers-reduced-motion: reduce){ *{animation:none !important; transition:none !important} }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>🥒 Pickle<span>Queue</span></h1>
+  <button class="btn ghost small" data-action="new-session" id="btnNewSession">New session</button>
+</header>
+<div class="wrap" id="app"></div>
+<nav class="tabs hidden" id="tabs">
+  <button data-action="tab" data-tab="play" class="on">Courts</button>
+  <button data-action="tab" data-tab="players">Players</button>
+  <button data-action="tab" data-tab="log">Log</button>
+</nav>
+<div id="modalHost"></div>
+<div id="toastHost"></div>
+
+<script>
+/* ============================================================
+   ENGINE — pure game/queue logic (no DOM)
+   ============================================================ */
+const LS_KEY = 'pickle-queue-v1';
+
+let state = null;
+
+function freshState(names, courtCount){
+  const s = {
+    screen:'main', startedAt:Date.now(), tick:0, matchSeq:0,
+    players:[], courts:[], matches:[], undoStack:[]
+  };
+  names.forEach(n => s.players.push(mkPlayer(s, n, 0)));
+  for(let i=1;i<=courtCount;i++) s.courts.push(mkCourt(i));
+  return s;
+}
+function mkPlayer(s, name, base){
+  return { id:'p'+(++s.tick)+'_'+Math.random().toString(36).slice(2,6),
+    name, games:0, base:(base||0), wins:0, losses:0, wonLast:false,
+    status:'queued', queuedAt:(++s.tick), history:[] };
+}
+function mkCourt(i){ return { id:i, phase:'idle', teams:null, startedAt:null }; }
+
+function byId(id){ return state.players.find(p=>p.id===id); }
+function nameOf(id){ const p=byId(id); return p?p.name:'?'; }
+function effGames(p){ return p.games + p.base; }
+function courtPlayers(c){ return c.teams ? [...c.teams[0], ...c.teams[1]] : []; }
+
+/* Priority: fewest (effective) games first  →  recent winners first  →  waited longest first */
+function prioritySort(list){
+  return list.slice().sort((a,b)=>
+    effGames(a)-effGames(b) ||
+    ((b.wonLast?1:0)-(a.wonLast?1:0)) ||
+    a.queuedAt-b.queuedAt );
+}
+function queuedPlayers(){ return state.players.filter(p=>p.status==='queued'); }
+
+function randomTeams(ids){
+  const a=ids.slice();
+  for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  return [[a[0],a[1]],[a[2],a[3]]];
+}
+
+/* Fill any idle court with the top 4 of the priority queue */
+function fillCourts(){
+  for(const c of state.courts){
+    if(c.phase!=='idle') continue;
+    const q = prioritySort(queuedPlayers());
+    if(q.length<4) continue;
+    const four = q.slice(0,4);
+    four.forEach(p=>p.status='playing');
+    c.teams = randomTeams(four.map(p=>p.id));
+    c.phase = 'staging';
+    c.startedAt = null;
+  }
+}
+
+function shuffleTeams(courtId){
+  const c = state.courts.find(x=>x.id===courtId);
+  if(c && c.teams) c.teams = randomTeams(courtPlayers(c));
+}
+
+function startMatch(courtId){
+  const c = state.courts.find(x=>x.id===courtId);
+  if(c && c.phase==='staging'){ c.phase='playing'; c.startedAt=Date.now(); }
+}
+
+/* Find where a player currently sits on any court: {court, ti, pi} or null */
+function findSlot(pid){
+  for(const c of state.courts){
+    if(!c.teams) continue;
+    for(let ti=0;ti<2;ti++){
+      const pi = c.teams[ti].indexOf(pid);
+      if(pi>-1) return {court:c, ti, pi};
+    }
+  }
+  return null;
+}
+
+/* Swap any two players: court↔court (incl. same court = team swap) or court↔queue (substitution) */
+function swapPlayers(aId, bId){
+  if(aId===bId) return false;
+  const A=byId(aId), B=byId(bId);
+  if(!A||!B) return false;
+  const sa=findSlot(aId), sb=findSlot(bId);
+  if(sa && sb){
+    sa.court.teams[sa.ti][sa.pi]=bId;
+    sb.court.teams[sb.ti][sb.pi]=aId;
+    return true;
+  }
+  if(sa && !sb){ return subIn(sa, A, B); }
+  if(sb && !sa){ return subIn(sb, B, A); }
+  return false; // both in queue — nothing to swap
+}
+function subIn(slot, onCourt, fromQueue){
+  if(fromQueue.status!=='queued') return false;
+  slot.court.teams[slot.ti][slot.pi] = fromQueue.id;
+  fromQueue.status='playing';
+  onCourt.status='queued'; onCourt.queuedAt=(++state.tick);
+  return true;
+}
+
+function pushUndo(){
+  state.undoStack.push(JSON.stringify({...state, undoStack:[]}));
+  if(state.undoStack.length>10) state.undoStack.shift();
+}
+function undo(){
+  const snap = state.undoStack.pop();
+  if(!snap) return false;
+  const keep = state.undoStack;
+  state = JSON.parse(snap);
+  state.undoStack = keep;
+  return true;
+}
+
+function finishMatch(courtId, winnerIdx, sa, sb){
+  const c = state.courts.find(x=>x.id===courtId);
+  if(!c || !c.teams) return;
+  pushUndo();
+  const rec = { id:(++state.matchSeq), court:c.id,
+    a:c.teams[0].map(nameOf), b:c.teams[1].map(nameOf),
+    sa:(sa??null), sb:(sb??null), w:winnerIdx, t:Date.now() };
+  state.matches.unshift(rec);
+  for(let ti=0; ti<2; ti++){
+    const won = (ti===winnerIdx);
+    for(const pid of c.teams[ti]){
+      const p = byId(pid); if(!p) continue;
+      p.games++; won ? p.wins++ : p.losses++;
+      p.wonLast = won;
+      const mateId = c.teams[ti].find(x=>x!==pid);
+      p.history.unshift({ m:rec.id, teammate:nameOf(mateId), won,
+        score:(sa!=null&&sb!=null) ? (ti===0? sa+'–'+sb : sb+'–'+sa) : null });
+      p.status='queued'; p.queuedAt=(++state.tick);
+    }
+  }
+  c.phase='idle'; c.teams=null; c.startedAt=null;
+  fillCourts();
+}
+
+function addPlayer(name){
+  /* Late joiners are assumed to have already played as many games as the
+     current leaders — they join the back of the rotation with no catch-up
+     priority. Their real played count still shows in stats. */
+  const active = state.players.filter(p=>p.status!=='out');
+  const base = active.length ? Math.max(...active.map(effGames)) : 0;
+  const p = mkPlayer(state, name, base);
+  if(base>0) p.late = true;
+  state.players.push(p);
+  fillCourts();
+  return p;
+}
+
+function toggleBreak(pid){
+  const p = byId(pid); if(!p) return false;
+  if(p.status==='playing') return false; // must sub out first
+  if(p.status==='queued'){ p.status='break'; }
+  else if(p.status==='break'){ p.status='queued'; p.queuedAt=(++state.tick); fillCourts(); }
+  return true;
+}
+
+function removePlayer(pid){
+  const p = byId(pid); if(!p) return false;
+  if(p.status==='playing') return false;
+  if(p.games>0){ p.status='out'; }
+  else { state.players = state.players.filter(x=>x.id!==pid); }
+  return true;
+}
+
+function setCourtCount(n){
+  n = Math.max(1, Math.min(12, n|0));
+  const cur = state.courts.length;
+  if(n>cur){ for(let i=cur+1;i<=n;i++) state.courts.push(mkCourt(i)); fillCourts(); }
+  else if(n<cur){
+    // remove idle courts from the end only
+    for(let i=cur-1; i>=0 && state.courts.length>n; i--){
+      if(state.courts[i].phase==='idle') state.courts.splice(i,1);
+    }
+  }
+}
+
+function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} if(typeof pushLive==='function') pushLive(); }
+function sessionAsText(){
+  const L=[];
+  L.push('PICKLEBALL OPEN PLAY — SESSION LOG');
+  L.push('Exported: '+new Date().toLocaleString());
+  L.push('');
+  L.push('STANDINGS');
+  state.players.filter(p=>p.status!=='out' || p.games>0)
+    .slice().sort((a,b)=>b.wins-a.wins || a.losses-b.losses)
+    .forEach(p=>L.push(`  ${p.name}: ${p.games} games, ${p.wins}W–${p.losses}L${p.late?' (joined late)':''}${p.status==='out'?' (left early)':''}`));
+  L.push('');
+  L.push('MATCHES');
+  state.matches.slice().reverse().forEach(m=>{
+    const t=new Date(m.t), hh=t.getHours()%12||12, mm=String(t.getMinutes()).padStart(2,'0'), ap=t.getHours()<12?'am':'pm';
+    const win=(m.w===0?m.a:m.b).join(' & '), lose=(m.w===0?m.b:m.a).join(' & ');
+    const sc=(m.sa!=null&&m.sb!=null)?` ${m.w===0?m.sa+'–'+m.sb:m.sb+'–'+m.sa}`:'';
+    L.push(`  #${m.id} Court ${m.court} ${hh}:${mm}${ap} — ${win} def. ${lose}${sc}`);
+  });
+  return L.join('\n');
+}
+function load(){
+  try{ const raw = localStorage.getItem(LS_KEY); if(raw) state = JSON.parse(raw); }catch(e){ state=null; }
+}
+/* ============================================================
+   UI
+   ============================================================ */
+const $app = document.getElementById('app');
+const $tabs = document.getElementById('tabs');
+const $modalHost = document.getElementById('modalHost');
+const ui = { tab:'play', selected:null, setupNames:[] };
+const finishing = new Set();
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function render(){
+  if(!state || state.screen==='setup'){ renderSetup(); return; }
+  if(state.screen==='summary'){ renderSummary(); return; }
+  $tabs.classList.remove('hidden');
+  document.getElementById('btnNewSession').classList.remove('hidden');
+  $tabs.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.tab===ui.tab));
+  if(ui.tab==='play') renderPlay();
+  else if(ui.tab==='players') renderPlayers();
+  else renderLog();
+}
+
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function animatedRender(){
+  if(REDUCED){ render(); return; }
+  const old = new Map();
+  document.querySelectorAll('[data-chip]').forEach(el=>old.set(el.dataset.chip, el.getBoundingClientRect()));
+  render();
+  requestAnimationFrame(()=>{
+    document.querySelectorAll('[data-chip]').forEach(el=>{
+      const prev = old.get(el.dataset.chip), now = el.getBoundingClientRect();
+      if(prev){
+        const dx = prev.left-now.left, dy = prev.top-now.top;
+        if(Math.abs(dx)>2 || Math.abs(dy)>2)
+          el.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'none'}],{duration:300,easing:'cubic-bezier(.2,.8,.2,1)'});
+      } else {
+        el.animate([{opacity:0, transform:'scale(.85)'},{opacity:1, transform:'none'}],{duration:220,easing:'ease-out'});
+      }
+    });
+  });
+}
+
+/* ---------- setup screen ---------- */
+function renderSetup(){
+  $tabs.classList.add('hidden');
+  document.getElementById('btnNewSession').classList.add('hidden');
+  $app.innerHTML = `
+    <div class="card">
+      <h2>Who's playing today?</h2>
+      <p class="subtle" style="margin:6px 0 12px">Add everyone in the group. You can add late arrivals any time.</p>
+      <div class="row">
+        <input class="grow" id="setupName" placeholder="Player name" autocomplete="off" enterkeyhint="done">
+        <button class="btn primary" data-action="setup-add">Add</button>
+      </div>
+      <div class="plist">
+        ${ui.setupNames.map((n,i)=>`<span class="ptag"><b>${esc(n)}</b><span class="x" data-action="setup-remove" data-i="${i}">✕</span></span>`).join('')||'<span class="subtle">No players yet</span>'}
+      </div>
+      <label class="lbl">Courts available</label>
+      <input id="setupCourts" type="number" min="1" max="12" value="2" style="width:90px">
+      <div style="margin-top:18px">
+        <button class="btn primary" style="width:100%; padding:14px" data-action="setup-start">Start open play →</button>
+      </div>
+      <p class="hint">Need at least 4 players per court to fill it. Extra players wait in the paddle queue.</p>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <span class="subtle">Have a backup file from a previous session?</span>
+        <button class="btn ghost small" data-action="restore">Restore .json</button>
+      </div>
+      <input type="file" id="restoreFile" accept=".json,application/json" class="hidden">
+    </div>`;
+  const inp = document.getElementById('setupName');
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter') doAction('setup-add'); });
+  inp.focus();
+}
+
+/* ---------- play tab ---------- */
+function chipHtml(pid, extra=''){
+  const p = byId(pid);
+  return `<div class="chip ${ui.selected===pid?'sel':''} ${extra}" data-chip="${pid}">
+    ${esc(p.name)}<small>${p.games}g · ${p.wins}W${p.late?' · ⏰':''}</small></div>`;
+}
+function renderPlay(){
+  const courtsHtml = state.courts.map(c=>{
+    let body='';
+    if(c.phase==='idle'){
+      const waiting = queuedPlayers().length;
+      body = `<div class="empty-court">Court open — ${waiting<4? `waiting for players (${waiting}/4 in queue)` : 'filling…'}</div>`;
+    } else {
+      body = `
+        <div class="teams">
+          <div class="team a" data-court="${c.id}" data-team="0"><div class="tname">Team A</div>${c.teams[0].map(id=>chipHtml(id)).join('')}</div>
+          <div class="vs">VS</div>
+          <div class="team b" data-court="${c.id}" data-team="1"><div class="tname">Team B</div>${c.teams[1].map(id=>chipHtml(id)).join('')}</div>
+        </div>
+        <div class="actions">
+          ${c.phase==='staging'
+            ? `<button class="btn" data-action="shuffle" data-court="${c.id}">🎲 Shuffle</button>
+               <button class="btn primary" data-action="start" data-court="${c.id}">Start match</button>`
+            : `<button class="btn primary" data-action="finish" data-court="${c.id}">🏁 Finish match</button>`}
+        </div>`;
+    }
+    const badge = c.phase==='playing' ? `<span class="badge play">● playing <span class="timer" data-start="${c.startedAt}">0:00</span></span>`
+                : c.phase==='staging' ? `<span class="badge stage">setting teams</span>`
+                : `<span class="badge">open</span>`;
+    return `<div class="court"><div class="head"><b>Court ${c.id}</b>${badge}</div><div class="body">${body}</div></div>`;
+  }).join('');
+
+  const q = prioritySort(queuedPlayers());
+  const onBreak = state.players.filter(p=>p.status==='break');
+  const queueHtml = q.map((p,i)=>`
+    <div class="qitem ${i<4?'next':''}">
+      <span class="qpos">${i+1}</span>
+      <span class="qname" data-chip="${p.id}">${esc(p.name)}
+        <span class="meta"> · ${p.games} game${p.games===1?'':'s'}${p.wonLast?' · won last':''}${p.late?' · ⏰ late':''}</span></span>
+      ${p.wonLast?'<span class="tag w">W</span>':''}
+      <button class="btn ghost small" data-action="break" data-pid="${p.id}">💤 Break</button>
+    </div>`).join('') || '<p class="subtle" style="padding:8px 4px">Queue is empty — everyone is on court.</p>';
+  const breakHtml = onBreak.map(p=>`
+    <div class="qitem"><span class="qpos">💤</span>
+      <span class="qname">${esc(p.name)}<span class="meta"> · ${p.games} game${p.games===1?'':'s'}</span></span>
+      <button class="btn small primary" data-action="break" data-pid="${p.id}">I'm back</button>
+    </div>`).join('');
+
+  $app.innerHTML = courtsHtml + `
+    <div class="card">
+      <h3 style="margin-bottom:6px">🏓 Paddle queue</h3>
+      <p class="subtle">Fewest games first · recent winners get the tiebreak · then longest wait.</p>
+      ${queueHtml}
+      ${breakHtml? `<h3 style="margin:14px 0 4px; font-size:14px; color:var(--dim)">On break</h3>${breakHtml}`:''}
+      <p class="hint">💡 Tap a player on a court, then tap another player (on court or in queue) to swap them — works before or during a match. 🎲 Shuffle re-randomizes teams.</p>
+    </div>`;
+}
+
+/* ---------- players tab ---------- */
+function renderPlayers(){
+  const active = state.players.filter(p=>p.status!=='out');
+  const rows = active.slice().sort((a,b)=>b.games-a.games || b.wins-a.wins).map(p=>{
+    const last = p.history[0];
+    return `<tr>
+      <td><b>${esc(p.name)}</b>${p.late?' <span class="tag zz">⏰ late</span>':''}<br><span class="subtle" style="font-size:11.5px">${last? `last with ${esc(last.teammate)}${last.score? ' · '+last.score : ''}` : '—'}</span></td>
+      <td>${p.games}</td>
+      <td>${p.wins}–${p.losses}</td>
+      <td><span class="st ${p.status}">${p.status}</span></td>
+      <td style="text-align:right; white-space:nowrap">
+        ${p.status!=='playing' ? `<button class="btn ghost small" data-action="break" data-pid="${p.id}">${p.status==='break'?'▶':'💤'}</button>
+        <button class="btn danger small" data-action="remove" data-pid="${p.id}">✕</button>`:''}
+      </td></tr>`;
+  }).join('');
+  const gone = state.players.filter(p=>p.status==='out');
+  $app.innerHTML = `
+    <div class="card">
+      <h3>Add a player</h3>
+      <div class="row" style="margin-top:10px">
+        <input class="grow" id="addName" placeholder="Late arrival's name" autocomplete="off">
+        <button class="btn primary" data-action="add-player">Add</button>
+      </div>
+      <p class="hint">Late joiners drop into the back of the rotation — no catch-up priority. They carry a ⏰ tag so their lower game count makes sense in the logs.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:10px">Players</h3>
+      <table>
+        <tr><th>Name</th><th>Games</th><th>W–L</th><th>Status</th><th></th></tr>
+        ${rows}
+      </table>
+      ${gone.length? `<p class="subtle" style="margin-top:10px">Left: ${gone.map(p=>esc(p.name)+` (${p.wins}–${p.losses})`).join(', ')}</p>`:''}
+    </div>
+    <div class="card">
+      <h3>Courts</h3>
+      <div class="row" style="margin-top:10px">
+        <input id="courtCount" type="number" min="1" max="12" value="${state.courts.length}" style="width:80px">
+        <button class="btn" data-action="set-courts">Update</button>
+      </div>
+      <p class="hint">Adding a court fills it from the queue right away. Removing only takes away open courts.</p>
+    </div>`;
+  document.getElementById('addName').addEventListener('keydown', e=>{ if(e.key==='Enter') doAction('add-player'); });
+}
+
+/* ---------- log tab ---------- */
+function renderLog(){
+  const items = matchListHtml() || '<p class="subtle">No matches finished yet.</p>';
+  $app.innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h3>Match log</h3>
+        ${state.undoStack.length? '<button class="btn ghost small" data-action="undo">↩ Undo last result</button>':''}
+      </div>
+      <div style="margin-top:8px">${items}</div>
+    </div>
+    <div class="card">
+      <h3>Backups</h3>
+      <p class="subtle" style="margin:6px 0 10px">The session auto-saves in this browser. Export a backup if you want a copy or need to move to another phone.</p>
+      <div class="row">
+        <button class="btn grow" data-action="export-json">💾 Backup (.json)</button>
+        <button class="btn grow" data-action="export-txt">📄 Log (.txt)</button>
+      </div>
+      <p class="hint">Restore a .json backup from the start screen (New session → Restore).</p>
+    </div>
+    <div class="card">
+      <h3>📡 Live sharing</h3>
+      ${live && live.on ? `
+        <p class="subtle" style="margin:6px 0 10px">Sharing live — players can watch the queue, courts and standings at your link.</p>
+        <div class="row">
+          <button class="btn primary grow" data-action="live-share">📤 Share live link</button>
+          <button class="btn grow" data-action="live-copy">📋 Copy</button>
+        </div>
+        <div class="row" style="margin-top:8px"><button class="btn danger grow" data-action="live-stop">Stop sharing</button></div>`
+      : live && live.dbUrl ? `
+        <p class="subtle" style="margin:6px 0 10px">Ready to go live using your saved database.</p>
+        <button class="btn primary" style="width:100%" data-action="live-start">🔴 Go live</button>`
+      : `
+        <p class="subtle" style="margin:6px 0 10px">One-time setup: paste your Firebase Realtime Database URL.</p>
+        <input id="dbUrl" style="width:100%" placeholder="https://your-db-default-rtdb.firebaseio.com">
+        <div class="row" style="margin-top:8px"><button class="btn primary grow" data-action="live-setup">Save & go live</button></div>
+        <p class="hint">Free at console.firebase.google.com → Create project → Build → Realtime Database → Create database (test mode) → copy the URL shown in the Data tab.</p>`}
+    </div>
+    <div class="card">
+      <h3>Finish session</h3>
+      <p class="subtle" style="margin:6px 0 10px">Wraps up the day and builds a summary to send to the group.</p>
+      <button class="holdbtn" id="holdFinish"><div class="fill"></div><span class="txt">✋ Hold to finish session</span></button>
+      <p class="hint">Press and hold for a moment — a quick tap won't trigger it. You can still resume afterwards.</p>
+    </div>`;
+  const hb = document.getElementById('holdFinish');
+  let holdT = null;
+  const disarm = ()=>{ hb.classList.remove('arming'); clearTimeout(holdT); };
+  hb.addEventListener('pointerdown', e=>{ e.preventDefault(); hb.classList.add('arming'); holdT = setTimeout(()=>doAction('finish-session'), 1200); });
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>hb.addEventListener(ev, disarm));
+}
+
+function matchListHtml(){
+  return state.matches.map(m=>{
+    const t = new Date(m.t); const hh = t.getHours()%12||12, mm=String(t.getMinutes()).padStart(2,'0'), ap=t.getHours()<12?'am':'pm';
+    const win = m.w===0? m.a : m.b, lose = m.w===0? m.b : m.a;
+    const score = (m.sa!=null&&m.sb!=null) ? `<span class="score">${m.w===0? m.sa+'–'+m.sb : m.sb+'–'+m.sa}</span>` : '<span class="score">W</span>';
+    return `<div class="match">
+      <span class="who">${win.map(esc).join(' & ')}</span> ${score} over <span class="who">${lose.map(esc).join(' & ')}</span>
+      <div class="meta">Court ${m.court} · ${hh}:${mm}${ap}</div></div>`;
+  }).join('');
+}
+
+function download(filename, text, type){
+  const blob = new Blob([text], {type: type||'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function stamp(){
+  const d=new Date();
+  return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'-'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0');
+}
+
+/* ---------- live sharing (Firebase RTDB via REST) ---------- */
+const LIVE_KEY = 'pickle-live-v1';
+let live = null; try{ live = JSON.parse(localStorage.getItem(LIVE_KEY)||'null'); }catch(e){}
+if(!live || !live.dbUrl) live = { dbUrl:'https://picklequeue-fa7cc-default-rtdb.asia-southeast1.firebasedatabase.app', id:null, on:false };
+function liveSave(){ try{ localStorage.setItem(LIVE_KEY, JSON.stringify(live)); }catch(e){} }
+function liveUrl(){ return live.dbUrl.replace(/\/$/,'')+'/sessions/'+live.id+'.json'; }
+function liveLink(){ return location.origin+location.pathname+'#live='+live.id+'&db='+encodeURIComponent(live.dbUrl.replace(/\/$/,'')); }
+let pushT = null;
+function pushLive(){
+  if(!live || !live.on || !live.id || !state || state.screen==='setup') return;
+  clearTimeout(pushT);
+  pushT = setTimeout(()=>{
+    const payload = {...state, undoStack:[], t:Date.now(),
+      players: state.players.map(p=>({id:p.id,name:p.name,games:p.games,base:p.base,wins:p.wins,losses:p.losses,wonLast:p.wonLast,status:p.status,queuedAt:p.queuedAt,late:!!p.late}))};
+    fetch(liveUrl(), {method:'PUT', body: JSON.stringify(payload)}).catch(()=>{});
+  }, 600);
+}
+/* viewer */
+let viewerLastT = 0;
+function startViewer(db, id){
+  document.getElementById('btnNewSession').classList.add('hidden');
+  $tabs.classList.add('hidden');
+  $app.innerHTML = '<div class="card"><p class="subtle">Connecting to live session…</p></div>';
+  const url = db.replace(/\/$/,'')+'/sessions/'+id+'.json';
+  const apply = data => {
+    if(!data){ $app.innerHTML='<div class="card"><p class="subtle">Live session ended or not found. Ask the organizer for a fresh link.</p></div>'; return; }
+    data.players = data.players||[]; data.courts = data.courts||[]; data.matches = data.matches||[]; data.undoStack = [];
+    state = data; viewerLastT = data.t||Date.now(); renderViewer();
+  };
+  const poll = ()=>{ fetch(url).then(r=>r.json()).then(apply).catch(()=>{}); };
+  let pollT = null;
+  try{
+    const es = new EventSource(url);
+    es.addEventListener('put', e=>{ try{ const d = JSON.parse(e.data); (d.path==='/' ? apply(d.data) : poll()); }catch(err){} });
+    es.addEventListener('patch', ()=>poll());
+    es.onerror = ()=>{ if(!pollT) pollT = setInterval(poll, 5000); };
+  }catch(e){ pollT = setInterval(poll, 5000); }
+  poll();
+}
+function vchip(pid){
+  const p = byId(pid);
+  return `<div class="chip" style="touch-action:auto">${esc(p?p.name:'?')}<small>${p? p.games+'g · '+p.wins+'W' : ''}${p&&p.late?' · ⏰':''}</small></div>`;
+}
+function renderViewer(){
+  if(!state || !state.players) return;
+  const courtsHtml = state.courts.map(c=>{
+    const body = !c.teams ? '<div class="empty-court">Court open</div>' : `
+      <div class="teams">
+        <div class="team a"><div class="tname">Team A</div>${c.teams[0].map(vchip).join('')}</div>
+        <div class="vs">VS</div>
+        <div class="team b"><div class="tname">Team B</div>${c.teams[1].map(vchip).join('')}</div>
+      </div>`;
+    const badge = c.phase==='playing' ? `<span class="badge play">● playing <span class="timer" data-start="${c.startedAt}">0:00</span></span>`
+                : c.phase==='staging' ? '<span class="badge stage">setting teams</span>' : '<span class="badge">open</span>';
+    return `<div class="court"><div class="head"><b>Court ${c.id}</b>${badge}</div><div class="body">${body}</div></div>`;
+  }).join('');
+  const q = prioritySort(queuedPlayers());
+  const queueHtml = q.map((p,i)=>`
+    <div class="qitem ${i<4?'next':''}"><span class="qpos">${i+1}</span>
+      <span class="qname">${esc(p.name)}<span class="meta"> · ${p.games} game${p.games===1?'':'s'}${p.wonLast?' · won last':''}${p.late?' · ⏰ late':''}</span></span>
+    </div>`).join('') || '<p class="subtle" style="padding:8px 4px">Queue is empty — everyone is on court.</p>';
+  const rank = rankedPlayers(), medals=['🥇','🥈','🥉'];
+  const standings = rank.map((p,i)=>`<tr><td style="width:36px">${medals[i]||(i+1)+'.'}</td><td><b>${esc(p.name)}</b>${p.late?' <span class="tag zz">⏰</span>':''}</td><td>${p.wins}–${p.losses}</td><td class="subtle">${p.games} games</td></tr>`).join('');
+  const u = new Date(viewerLastT);
+  $app.innerHTML = `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px">
+      <b style="color:var(--accent)">● LIVE</b>
+      <span class="subtle">updated ${u.getHours()%12||12}:${String(u.getMinutes()).padStart(2,'0')}</span>
+    </div>
+    ${state.screen==='summary' ? '<div class="card" style="text-align:center"><h3>🏁 Session wrapped</h3></div>' : ''}
+    ${courtsHtml}
+    <div class="card"><h3 style="margin-bottom:6px">🏓 Up next</h3>${queueHtml}</div>
+    <div class="card"><h3 style="margin-bottom:8px">Standings</h3><table>${standings||''}</table></div>
+    <div class="card"><h3 style="margin-bottom:8px">Matches</h3>${matchListHtml()||'<p class="subtle">No matches yet.</p>'}</div>`;
+}
+
+/* ---------- session summary ---------- */
+function rankedPlayers(){
+  return state.players.filter(p=>p.games>0)
+    .slice().sort((a,b)=>b.wins-a.wins || a.losses-b.losses || b.games-a.games);
+}
+function shareText(){
+  const d = new Date(state.startedAt||Date.now());
+  const rank = rankedPlayers(), medals=['🥇','🥈','🥉'], L=[];
+  L.push(`🥒 Pickleball Open Play — ${d.toLocaleDateString(undefined,{month:'short', day:'numeric'})}`);
+  L.push(`${rank.length} players · ${state.matches.length} matches`);
+  L.push('');
+  L.push('Standings:');
+  rank.forEach((p,i)=>L.push(`${medals[i]||(i+1)+'.'} ${p.name}${p.late?' ⏰':''} — ${p.wins}W ${p.losses}L`));
+  if(rank.some(p=>p.late)) L.push('⏰ joined late');
+  L.push('');
+  L.push('Matches:');
+  state.matches.slice().reverse().forEach(m=>{
+    const win=(m.w===0?m.a:m.b).join(' & '), lose=(m.w===0?m.b:m.a).join(' & ');
+    const sc=(m.sa!=null&&m.sb!=null)? ` ${m.w===0? m.sa+'–'+m.sb : m.sb+'–'+m.sa}` : '';
+    L.push(`• ${win} def. ${lose}${sc}`);
+  });
+  return L.join('\n');
+}
+function renderSummary(){
+  $tabs.classList.add('hidden');
+  document.getElementById('btnNewSession').classList.add('hidden');
+  const rank = rankedPlayers(), medals=['🥇','🥈','🥉'];
+  const rows = rank.map((p,i)=>`<tr><td style="width:36px; font-size:16px">${medals[i]||(i+1)+'.'}</td><td><b>${esc(p.name)}</b>${p.late?' <span class="tag zz">⏰ late</span>':''}</td><td>${p.wins}–${p.losses}</td><td class="subtle">${p.games} games</td></tr>`).join('');
+  const d = new Date(state.startedAt||Date.now());
+  const dur = (state.endedAt && state.startedAt) ? Math.max(1, Math.round((state.endedAt-state.startedAt)/60000)) : null;
+  const durTxt = dur ? (dur>=60 ? Math.floor(dur/60)+'h '+(dur%60)+'m' : dur+'m') : '';
+  const live = state.courts.some(c=>c.teams);
+  $app.innerHTML = `
+    <div class="card" style="text-align:center">
+      <h2>🏁 Session wrapped</h2>
+      <p class="subtle" style="margin-top:6px">${d.toLocaleDateString(undefined,{weekday:'long', month:'short', day:'numeric'})} · ${rank.length} players · ${state.matches.length} matches${durTxt? ' · '+durTxt : ''}</p>
+      ${live? '<p class="hint">⚠ A match was still in progress — it isn\'t counted. Resume the session to finish it.</p>':''}
+    </div>
+    <div class="card"><h3 style="margin-bottom:8px">Final standings</h3><table>${rows||''}</table>${rank.some(p=>p.late)?'<p class="hint">⏰ = joined late, so their game count starts from when they arrived.</p>':''}</div>
+    <div class="card">
+      <h3 style="margin-bottom:10px">Send to the group</h3>
+      <div class="row">
+        <button class="btn primary grow" data-action="share-summary">📤 Share</button>
+        <button class="btn grow" data-action="copy-summary">📋 Copy</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn grow" data-action="export-txt">📄 Log .txt</button>
+        <button class="btn grow" data-action="export-json">💾 Backup .json</button>
+      </div>
+    </div>
+    <div class="card"><h3 style="margin-bottom:8px">All matches</h3>${matchListHtml()||'<p class="subtle">No matches recorded.</p>'}</div>
+    <div class="row" style="margin-bottom:20px">
+      <button class="btn ghost grow" data-action="resume-session">← Resume session</button>
+      <button class="btn grow" data-action="new-session" style="color:var(--danger)">Start fresh</button>
+    </div>`;
+}
+
+/* ---------- finish modal ---------- */
+function openFinishModal(courtId){
+  const c = state.courts.find(x=>x.id===courtId); if(!c||!c.teams) return;
+  const an = c.teams[0].map(nameOf).join(' & '), bn = c.teams[1].map(nameOf).join(' & ');
+  $modalHost.innerHTML = `
+    <div class="overlay" data-action="modal-bg">
+      <div class="modal">
+        <h3>Court ${c.id} — who won?</h3>
+        <p class="subtle">Scores are optional.</p>
+        <div class="scorerow">
+          <input id="sa" type="number" inputmode="numeric" placeholder="—" min="0" style="border-color:rgba(95,212,245,.5)">
+          <span class="subtle">to</span>
+          <input id="sb" type="number" inputmode="numeric" placeholder="—" min="0" style="border-color:rgba(255,184,92,.5)">
+        </div>
+        <div class="winbtns">
+          <button class="btn wa" data-action="win" data-court="${c.id}" data-w="0">🏆 ${esc(an)}</button>
+          <button class="btn wb" data-action="win" data-court="${c.id}" data-w="1">🏆 ${esc(bn)}</button>
+        </div>
+        <div style="margin-top:12px; text-align:center">
+          <button class="btn ghost small" data-action="modal-close">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+}
+function closeModal(){ $modalHost.innerHTML=''; }
+
+/* ---------- toast ---------- */
+let toastTimer=null;
+function toast(msg){
+  const h = document.getElementById('toastHost');
+  h.innerHTML = `<div class="toast">${esc(msg)}</div>`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>h.innerHTML='', 2200);
+}
+
+/* ---------- actions ---------- */
+function doAction(action, el){
+  switch(action){
+    case 'setup-add': {
+      const inp = document.getElementById('setupName');
+      const n = inp.value.trim();
+      if(n){ if(ui.setupNames.some(x=>x.toLowerCase()===n.toLowerCase())){ toast('Name already added'); } else ui.setupNames.push(n); }
+      renderSetup(); const i2=document.getElementById('setupName'); i2.focus();
+      return;
+    }
+    case 'setup-remove': ui.setupNames.splice(+el.dataset.i,1); renderSetup(); return;
+    case 'setup-start': {
+      const courts = +(document.getElementById('setupCourts').value)||1;
+      if(ui.setupNames.length<4){ toast('Need at least 4 players'); return; }
+      state = freshState(ui.setupNames, courts);
+      fillCourts(); save(); render(); return;
+    }
+    case 'tab': ui.tab = el.dataset.tab; ui.selected=null; render(); return;
+    case 'shuffle': shuffleTeams(+el.dataset.court); save(); animatedRender(); return;
+    case 'start': startMatch(+el.dataset.court); save(); render(); return;
+    case 'finish': if(!finishing.has(+el.dataset.court)) openFinishModal(+el.dataset.court); return;
+    case 'win': {
+      const sa = document.getElementById('sa').value, sb = document.getElementById('sb').value;
+      const cid = +el.dataset.court, w = +el.dataset.w;
+      const SA = sa===''?null:+sa, SB = sb===''?null:+sb;
+      closeModal();
+      finishing.add(cid);
+      const teamEl = document.querySelector(`.team[data-court="${cid}"][data-team="${w}"]`);
+      const go = ()=>{ finishMatch(cid, w, SA, SB); finishing.delete(cid); save(); animatedRender(); };
+      if(teamEl){ teamEl.classList.add('winflash'); setTimeout(go, 500); } else go();
+      return;
+    }
+    case 'modal-bg': if(event && event.target===el) closeModal(); return;
+    case 'modal-close': closeModal(); return;
+    case 'break': {
+      if(!toggleBreak(el.dataset.pid)) toast('Sub them out of the court first');
+      save(); animatedRender(); return;
+    }
+    case 'remove': {
+      const p = byId(el.dataset.pid);
+      if(p && confirm(`Remove ${p.name} from the session?`)){ removePlayer(p.id); save(); render(); }
+      return;
+    }
+    case 'add-player': {
+      const inp = document.getElementById('addName'); const n = inp.value.trim();
+      if(!n) return;
+      if(state.players.some(x=>x.status!=='out' && x.name.toLowerCase()===n.toLowerCase())){ toast('Name already in session'); return; }
+      addPlayer(n); save(); animatedRender(); toast(`${n} added to the queue`); return;
+    }
+    case 'set-courts': setCourtCount(+(document.getElementById('courtCount').value)); save(); animatedRender(); return;
+    case 'undo': if(undo()){ save(); animatedRender(); toast('Last result undone'); } return;
+    case 'export-json':
+      download('pickle-session-'+stamp()+'.json', JSON.stringify({...state, undoStack:[]}, null, 1), 'application/json');
+      toast('Backup downloaded'); return;
+    case 'export-txt':
+      download('pickle-log-'+stamp()+'.txt', sessionAsText());
+      toast('Log downloaded'); return;
+    case 'restore': {
+      const fi = document.getElementById('restoreFile');
+      fi.onchange = () => {
+        const f = fi.files[0]; if(!f) return;
+        const r = new FileReader();
+        r.onload = () => {
+          try{
+            const s = JSON.parse(r.result);
+            if(!s || !Array.isArray(s.players) || !Array.isArray(s.courts)) throw 0;
+            s.undoStack = s.undoStack||[];
+            state = s; save(); render(); toast('Session restored');
+          }catch(e){ toast('Not a valid backup file'); }
+        };
+        r.readAsText(f);
+      };
+      fi.click(); return;
+    }
+    case 'live-setup': {
+      const u = (document.getElementById('dbUrl').value||'').trim().replace(/\/$/,'');
+      if(!/^https:\/\/[^\s\/]+\.(firebaseio\.com|firebasedatabase\.app)$/.test(u)){ toast("That doesn't look like a Realtime Database URL"); return; }
+      live = { dbUrl:u, id:null, on:false }; liveSave(); doAction('live-start'); return;
+    }
+    case 'live-start':
+      if(!live || !live.dbUrl) return;
+      if(!live.id) live.id = Math.random().toString(36).slice(2,10);
+      live.on = true; liveSave(); pushLive(); render(); toast('You are live — share the link'); return;
+    case 'live-stop':
+      if(live){ fetch(liveUrl(), {method:'DELETE'}).catch(()=>{}); live.on = false; live.id = null; liveSave(); }
+      render(); toast('Live sharing stopped'); return;
+    case 'live-share': {
+      const url = liveLink();
+      if(navigator.share){ navigator.share({title:'PickleQueue — live', url}).catch(()=>{}); }
+      else if(navigator.clipboard){ navigator.clipboard.writeText(url).then(()=>toast('Link copied')); }
+      return;
+    }
+    case 'live-copy':
+      if(navigator.clipboard){ navigator.clipboard.writeText(liveLink()).then(()=>toast('Link copied')); }
+      return;
+    case 'finish-session': state.endedAt=Date.now(); state.screen='summary'; save(); render(); return;
+    case 'resume-session': state.screen='main'; save(); render(); return;
+    case 'share-summary': {
+      const txt = shareText();
+      if(navigator.share){ navigator.share({title:'Pickleball Open Play', text:txt}).catch(()=>{}); }
+      else if(navigator.clipboard){ navigator.clipboard.writeText(txt).then(()=>toast('Copied — paste it to the group chat')); }
+      return;
+    }
+    case 'copy-summary':
+      if(navigator.clipboard){ navigator.clipboard.writeText(shareText()).then(()=>toast('Summary copied')); }
+      return;
+    case 'new-session': {
+      if(confirm('Start a fresh session? Current players, queue and match log will be cleared.')){
+        localStorage.removeItem(LS_KEY); state=null; ui.setupNames=[]; ui.selected=null; ui.tab='play'; render();
+      } return;
+    }
+  }
+}
+
+document.addEventListener('click', e=>{
+  const el = e.target.closest('[data-action]');
+  if(el){ doAction(el.dataset.action, el); return; }
+});
+
+/* ---------- tap-to-swap + drag ---------- */
+function trySwap(aId, bId){
+  const A=byId(aId), B=byId(bId);
+  if(swapPlayers(aId,bId)){ ui.selected=null; save(); animatedRender(); toast(`Swapped ${A.name} ↔ ${B.name}`); }
+  else { toast('Pick one player on a court'); ui.selected=null; render(); }
+}
+let drag=null;
+document.addEventListener('pointerdown', e=>{
+  const chip = e.target.closest('[data-chip]');
+  if(!chip) return;
+  drag = { pid:chip.dataset.chip, x:e.clientX, y:e.clientY, el:chip, moved:false, ghost:null };
+});
+document.addEventListener('pointermove', e=>{
+  if(!drag) return;
+  if(!drag.moved && Math.hypot(e.clientX-drag.x, e.clientY-drag.y)>12){
+    drag.moved=true;
+    const g = drag.el.cloneNode(true);
+    g.classList.add('ghost'); document.body.appendChild(g); drag.ghost=g;
+  }
+  if(drag.moved){
+    e.preventDefault();
+    drag.ghost.style.left=(e.clientX-65)+'px'; drag.ghost.style.top=(e.clientY-30)+'px';
+    document.querySelectorAll('.drophint').forEach(x=>x.classList.remove('drophint'));
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const target = under && under.closest('[data-chip]');
+    if(target && target.dataset.chip!==drag.pid) target.classList.add('drophint');
+  }
+},{passive:false});
+document.addEventListener('pointerup', e=>{
+  if(!drag) return;
+  const d=drag; drag=null;
+  if(d.ghost) d.ghost.remove();
+  document.querySelectorAll('.drophint').forEach(x=>x.classList.remove('drophint'));
+  if(d.moved){
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const target = under && under.closest('[data-chip]');
+    if(target && target.dataset.chip!==d.pid) trySwap(d.pid, target.dataset.chip);
+  } else {
+    // tap: select / swap
+    const pid = d.pid;
+    if(ui.selected && ui.selected!==pid){ trySwap(ui.selected, pid); }
+    else if(ui.selected===pid){ ui.selected=null; render(); }
+    else { ui.selected=pid; render(); toast(`${nameOf(pid)} selected — tap someone to swap`); }
+  }
+});
+
+/* ---------- timers ---------- */
+setInterval(()=>{
+  document.querySelectorAll('.timer[data-start]').forEach(t=>{
+    const s = Math.max(0, Math.floor((Date.now()-(+t.dataset.start))/1000));
+    t.textContent = Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  });
+}, 1000);
+
+/* ---------- boot ---------- */
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  navigator.serviceWorker.register('sw.js');
+}
+const vh = new URLSearchParams(location.hash.slice(1));
+if(vh.get('live') && vh.get('db')){
+  startViewer(vh.get('db'), vh.get('live'));
+} else {
+  load();
+  if(!state){ state={screen:'setup'}; }
+  render();
+}
+</script>
+</body>
+</html>
