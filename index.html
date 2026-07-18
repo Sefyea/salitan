@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>PickleQueue — Open Play</title>
+<title>Salitan — Pickleball Open Play</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#10150f">
 <link rel="icon" href="icon-192.png">
@@ -124,7 +124,7 @@
 </head>
 <body>
 <header class="top">
-  <h1>🥒 Pickle<span>Queue</span></h1>
+  <h1>🥒 Sali<span>tan</span></h1>
   <button class="btn ghost small" data-action="new-session" id="btnNewSession">New session</button>
 </header>
 <div class="wrap" id="app"></div>
@@ -812,10 +812,10 @@ function doAction(action, el){
     case 'set-courts': setCourtCount(+(document.getElementById('courtCount').value)); save(); animatedRender(); return;
     case 'undo': if(undo()){ save(); animatedRender(); toast('Last result undone'); } return;
     case 'export-json':
-      download('pickle-session-'+stamp()+'.json', JSON.stringify({...state, undoStack:[]}, null, 1), 'application/json');
+      download('salitan-session-'+stamp()+'.json', JSON.stringify({...state, undoStack:[]}, null, 1), 'application/json');
       toast('Backup downloaded'); return;
     case 'export-txt':
-      download('pickle-log-'+stamp()+'.txt', sessionAsText());
+      download('salitan-log-'+stamp()+'.txt', sessionAsText());
       toast('Log downloaded'); return;
     case 'restore': {
       const fi = document.getElementById('restoreFile');
@@ -848,7 +848,7 @@ function doAction(action, el){
       render(); toast('Live sharing stopped'); return;
     case 'live-share': {
       const url = liveLink();
-      if(navigator.share){ navigator.share({title:'PickleQueue — live', url}).catch(()=>{}); }
+      if(navigator.share){ navigator.share({title:'Salitan — live', url}).catch(()=>{}); }
       else if(navigator.clipboard){ navigator.clipboard.writeText(url).then(()=>toast('Link copied')); }
       return;
     }

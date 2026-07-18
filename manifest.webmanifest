@@ -1,7 +1,7 @@
 {
-  "name": "PickleQueue — Pickleball Open Play",
-  "short_name": "PickleQueue",
-  "description": "Paddle-stacking queue manager for casual 2v2 open play",
+  "name": "Salitan — Pickleball Open Play",
+  "short_name": "Salitan",
+  "description": "Salitan — fair paddle-stacking rotation for casual 2v2 pickleball open play",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
