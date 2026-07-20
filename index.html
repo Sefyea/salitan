@@ -530,11 +530,13 @@ function renderPlay(){
       <span class="qname" data-chip="${p.id}"><span class="qgrab">⠿</span> ${esc(p.name)}
         <span class="meta"> · ${p.games} game${p.games===1?'':'s'}${p.wonLast?' · won last':''}${p.late?' · ⏰ late':''}${p.partnerId?' · 🔗 '+esc(nameOf(p.partnerId)):''}${p.pin!=null?' · 📌':''}</span></span>
       ${p.wonLast?'<span class="tag w">W</span>':''}
-      <button class="btn ghost small" data-action="break" data-pid="${p.id}">💤 Break</button>
+      <button class="btn ghost small" data-action="partner" data-pid="${p.id}">🔗</button>
+      <button class="btn ghost small" data-action="break" data-pid="${p.id}">💤</button>
     </div>`).join('') || '<p class="subtle" style="padding:8px 4px">Queue is empty — everyone is on court.</p>';
   const breakHtml = onBreak.map(p=>`
     <div class="qitem"><span class="qpos">💤</span>
       <span class="qname">${esc(p.name)}<span class="meta"> · ${p.games} game${p.games===1?'':'s'}</span></span>
+      <button class="btn ghost small" data-action="partner" data-pid="${p.id}">🔗</button>
       <button class="btn small primary" data-action="break" data-pid="${p.id}">I'm back</button>
     </div>`).join('');
 
@@ -544,7 +546,7 @@ function renderPlay(){
       <p class="subtle">Fewest games first · recent winners get the tiebreak · then longest wait.</p>
       ${queueHtml}
       ${breakHtml? `<h3 style="margin:14px 0 4px; font-size:14px; color:var(--dim)">On break</h3>${breakHtml}`:''}
-      <p class="hint">💡 Every name card drags: drop a queued player onto a team to put them in, drag a court player to the queue to bench them (next up subs in), or reorder the queue by dropping a card onto another spot (📌 = manually placed; clears when they play). Tap-tap works too. 🎲 Shuffle keeps 🔗 partners together.</p>
+      <p class="hint">💡 Every name card drags: drop a queued player onto a team to put them in, drag a court player to the queue to bench them (next up subs in), or reorder the queue by dropping a card onto another spot (📌 = manually placed; clears when they play). Tap-tap works too. Tap 🔗 on a queue card to set a fixed partner, 💤 for a break. 🎲 Shuffle keeps 🔗 partners together.</p>
     </div>`;
 }
 
