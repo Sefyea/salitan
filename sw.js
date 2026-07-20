@@ -1,5 +1,6 @@
-const CACHE = 'salitan-v3';
-const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'salitan-v4';
+const CDN_QR = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', CDN_QR];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
   self.skipWaiting();
@@ -11,7 +12,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  if (url.origin !== location.origin) return; // Firebase etc. go straight to network
+  if (url.origin !== location.origin && e.request.url !== CDN_QR) return; // Firebase etc. go straight to network
   if (e.request.mode === 'navigate' || url.pathname.endsWith('index.html')) {
     // network-first so app updates land; cache fallback keeps it working offline
     e.respondWith(

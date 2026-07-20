@@ -56,17 +56,20 @@
   .chip small{display:block; font-weight:400; color:var(--dim); font-size:11px; margin-top:1px;}
   .chip.sel{outline:2px solid var(--accent); outline-offset:1px;}
   .chip.drophint{outline:2px dashed var(--accent); outline-offset:1px;}
-  .chip.ghost{position:fixed; z-index:99; pointer-events:none; opacity:.9; width:130px; box-shadow:0 8px 24px rgba(0,0,0,.5);}
+  .dropzone{outline:2px dashed var(--accent); outline-offset:2px; border-radius:14px;}
+  .dragghost{position:fixed; z-index:99; pointer-events:none; opacity:.92; width:150px; background:var(--card2); border:1px solid var(--accent); border-radius:10px; padding:10px; text-align:center; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.5);}
   .court .actions{display:flex; gap:8px; margin-top:12px;}
   .court .actions .btn{flex:1;}
   .empty-court{color:var(--dim); font-size:14px; text-align:center; padding:8px 0;}
   .timer{font-variant-numeric:tabular-nums; color:var(--accent); font-weight:700;}
   /* queue */
-  .qitem{display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid var(--line);}
-  .qitem:last-child{border-bottom:none;}
+  .qitem{display:flex; align-items:center; gap:10px; padding:10px; background:var(--card2); border:1px solid var(--line); border-radius:10px; margin-bottom:8px;}
+  .qitem:last-child{margin-bottom:0;}
   .qpos{width:24px; height:24px; border-radius:50%; background:var(--card2); color:var(--dim); font-size:12px; display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0;}
   .qitem.next .qpos{background:var(--accent); color:var(--accent-ink);}
   .qname{flex:1; font-weight:600;}
+  .qname[data-chip]{touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none;}
+  .qgrab{color:var(--dim); margin-right:2px;}
   .qname .meta{font-weight:400; color:var(--dim); font-size:12px;}
   .tag{font-size:11px; padding:2px 7px; border-radius:99px; border:1px solid var(--line); color:var(--dim);}
   .tag.w{color:var(--win); border-color:var(--win);}
@@ -146,7 +149,7 @@ let state = null;
 
 function freshState(names, courtCount){
   const s = {
-    screen:'main', startedAt:Date.now(), tick:0, matchSeq:0,
+    screen:'main', startedAt:Date.now(), rev:0, tick:0, matchSeq:0,
     players:[], courts:[], matches:[], undoStack:[]
   };
   names.forEach(n => s.players.push(mkPlayer(s, n, 0)));
@@ -155,7 +158,7 @@ function freshState(names, courtCount){
 }
 function mkPlayer(s, name, base){
   return { id:'p'+(++s.tick)+'_'+Math.random().toString(36).slice(2,6),
-    name, games:0, base:(base||0), wins:0, losses:0, wonLast:false,
+    name, games:0, base:(base||0), wins:0, losses:0, wonLast:false, partnerId:null,
     status:'queued', queuedAt:(++s.tick), history:[] };
 }
 function mkCourt(i){ return { id:i, phase:'idle', teams:null, startedAt:null }; }
@@ -165,12 +168,26 @@ function nameOf(id){ const p=byId(id); return p?p.name:'?'; }
 function effGames(p){ return p.games + p.base; }
 function courtPlayers(c){ return c.teams ? [...c.teams[0], ...c.teams[1]] : []; }
 
-/* Priority: fewest (effective) games first  →  recent winners first  →  waited longest first */
+/* Priority: manual pins first (by pinned order), then fewest (effective) games →
+   recent winners → waited longest. Pins are set by drag-reordering the queue and
+   clear automatically when a player goes on court, so fairness resumes. */
 function prioritySort(list){
-  return list.slice().sort((a,b)=>
-    effGames(a)-effGames(b) ||
-    ((b.wonLast?1:0)-(a.wonLast?1:0)) ||
-    a.queuedAt-b.queuedAt );
+  return list.slice().sort((a,b)=>{
+    const ap = a.pin!=null, bp = b.pin!=null;
+    if(ap && bp) return a.pin-b.pin;
+    if(ap!==bp) return ap ? -1 : 1;
+    return effGames(a)-effGames(b) ||
+      ((b.wonLast?1:0)-(a.wonLast?1:0)) ||
+      a.queuedAt-b.queuedAt;
+  });
+}
+function reorderQueue(movePid, targetPid){
+  const ids = prioritySort(queuedPlayers()).map(p=>p.id);
+  const from = ids.indexOf(movePid), to = ids.indexOf(targetPid);
+  if(from<0 || to<0 || from===to) return false;
+  ids.splice(from,1); ids.splice(to,0,movePid);
+  ids.forEach((id,i)=>{ const p=byId(id); if(p) p.pin=i; });
+  return true;
 }
 function queuedPlayers(){ return state.players.filter(p=>p.status==='queued'); }
 
@@ -180,15 +197,66 @@ function randomTeams(ids){
   return [[a[0],a[1]],[a[2],a[3]]];
 }
 
+function shuffleArr(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+function setPartner(aId, bId){
+  const A = byId(aId); if(!A) return;
+  if(A.partnerId){ const old = byId(A.partnerId); if(old) old.partnerId = null; A.partnerId = null; }
+  if(bId){
+    const B = byId(bId); if(!B) return;
+    if(B.partnerId){ const old = byId(B.partnerId); if(old) old.partnerId = null; }
+    A.partnerId = B.id; B.partnerId = A.id;
+  }
+}
+
+/* Pick next 4 respecting fixed pairs: a paired player only goes on if their
+   partner fits too; if that leaves the court short, pairs win over the last single.
+   Only breaks a pair as a last resort so courts never idle with 4+ waiting. */
+function pickFour(){
+  const q = prioritySort(queuedPlayers());
+  if(q.length<4) return null;
+  const chosen = [];
+  const inChosen = id => chosen.some(p=>p.id===id);
+  for(const p of q){
+    if(chosen.length>=4) break;
+    if(inChosen(p.id)) continue;
+    const mate = p.partnerId ? q.find(x=>x.id===p.partnerId && !inChosen(x.id)) : null;
+    if(mate){ if(chosen.length<=2) chosen.push(p, mate); }
+    else chosen.push(p);
+  }
+  if(chosen.length===3){
+    for(const p of q){
+      if(inChosen(p.id) || !p.partnerId) continue;
+      const mate = q.find(x=>x.id===p.partnerId && !inChosen(x.id));
+      if(mate){ chosen.pop(); chosen.push(p, mate); break; }
+    }
+  }
+  if(chosen.length===4) return chosen;
+  return q.slice(0,4); // last resort: break a pair rather than stall the court
+}
+
+/* Split 4 into teams, keeping fixed pairs on the same side */
+function teamsFor(ids){
+  const ps = ids.map(byId), used = new Set(), pairs = [], singles = [];
+  for(const p of ps){
+    if(!p || used.has(p.id)) continue;
+    const mate = ps.find(x=>x && x.id===p.partnerId);
+    if(mate && !used.has(mate.id)){ pairs.push([p.id, mate.id]); used.add(p.id); used.add(mate.id); }
+  }
+  for(const p of ps) if(p && !used.has(p.id)) singles.push(p.id);
+  if(pairs.length===2) return shuffleArr(pairs);
+  if(pairs.length===1){ const s = shuffleArr(singles); return shuffleArr([pairs[0], [s[0], s[1]]]); }
+  return randomTeams(ids);
+}
+
 /* Fill any idle court with the top 4 of the priority queue */
 function fillCourts(){
   for(const c of state.courts){
     if(c.phase!=='idle') continue;
-    const q = prioritySort(queuedPlayers());
-    if(q.length<4) continue;
-    const four = q.slice(0,4);
-    four.forEach(p=>p.status='playing');
-    c.teams = randomTeams(four.map(p=>p.id));
+    const four = pickFour();
+    if(!four) continue;
+    four.forEach(p=>{ p.status='playing'; p.pin=null; });
+    c.teams = teamsFor(four.map(p=>p.id));
     c.phase = 'staging';
     c.startedAt = null;
   }
@@ -196,7 +264,7 @@ function fillCourts(){
 
 function shuffleTeams(courtId){
   const c = state.courts.find(x=>x.id===courtId);
-  if(c && c.teams) c.teams = randomTeams(courtPlayers(c));
+  if(c && c.teams) c.teams = teamsFor(courtPlayers(c));
 }
 
 function startMatch(courtId){
@@ -234,8 +302,8 @@ function swapPlayers(aId, bId){
 function subIn(slot, onCourt, fromQueue){
   if(fromQueue.status!=='queued') return false;
   slot.court.teams[slot.ti][slot.pi] = fromQueue.id;
-  fromQueue.status='playing';
-  onCourt.status='queued'; onCourt.queuedAt=(++state.tick);
+  fromQueue.status='playing'; fromQueue.pin=null;
+  onCourt.status='queued'; onCourt.queuedAt=(++state.tick); onCourt.pin=null;
   return true;
 }
 
@@ -267,9 +335,9 @@ function finishMatch(courtId, winnerIdx, sa, sb){
       p.games++; won ? p.wins++ : p.losses++;
       p.wonLast = won;
       const mateId = c.teams[ti].find(x=>x!==pid);
-      p.history.unshift({ m:rec.id, teammate:nameOf(mateId), won,
+      (p.history = p.history||[]).unshift({ m:rec.id, teammate:nameOf(mateId), won,
         score:(sa!=null&&sb!=null) ? (ti===0? sa+'–'+sb : sb+'–'+sa) : null });
-      p.status='queued'; p.queuedAt=(++state.tick);
+      p.status='queued'; p.queuedAt=(++state.tick); p.pin=null;
     }
   }
   c.phase='idle'; c.teams=null; c.startedAt=null;
@@ -292,7 +360,7 @@ function addPlayer(name){
 function toggleBreak(pid){
   const p = byId(pid); if(!p) return false;
   if(p.status==='playing') return false; // must sub out first
-  if(p.status==='queued'){ p.status='break'; }
+  if(p.status==='queued'){ p.status='break'; p.pin=null; }
   else if(p.status==='break'){ p.status='queued'; p.queuedAt=(++state.tick); fillCourts(); }
   return true;
 }
@@ -300,6 +368,7 @@ function toggleBreak(pid){
 function removePlayer(pid){
   const p = byId(pid); if(!p) return false;
   if(p.status==='playing') return false;
+  if(p.partnerId) setPartner(p.id, null);
   if(p.games>0){ p.status='out'; }
   else { state.players = state.players.filter(x=>x.id!==pid); }
   return true;
@@ -317,7 +386,11 @@ function setCourtCount(n){
   }
 }
 
-function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} if(typeof pushLive==='function') pushLive(); }
+var IS_VIEWER = false, adopting = false;
+function save(){
+  if(!IS_VIEWER){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} }
+  if(typeof pushLive==='function' && !adopting) pushLive();
+}
 function sessionAsText(){
   const L=[];
   L.push('PICKLEBALL OPEN PLAY — SESSION LOG');
@@ -352,6 +425,7 @@ const finishing = new Set();
 function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function render(){
+  if(IS_VIEWER){ if(!state) return; (state.mode==='open') ? renderOpenViewer() : renderViewer(); return; }
   if(!state || state.screen==='setup'){ renderSetup(); return; }
   if(state.screen==='summary'){ renderSummary(); return; }
   $tabs.classList.remove('hidden');
@@ -453,8 +527,8 @@ function renderPlay(){
   const queueHtml = q.map((p,i)=>`
     <div class="qitem ${i<4?'next':''}">
       <span class="qpos">${i+1}</span>
-      <span class="qname" data-chip="${p.id}">${esc(p.name)}
-        <span class="meta"> · ${p.games} game${p.games===1?'':'s'}${p.wonLast?' · won last':''}${p.late?' · ⏰ late':''}</span></span>
+      <span class="qname" data-chip="${p.id}"><span class="qgrab">⠿</span> ${esc(p.name)}
+        <span class="meta"> · ${p.games} game${p.games===1?'':'s'}${p.wonLast?' · won last':''}${p.late?' · ⏰ late':''}${p.partnerId?' · 🔗 '+esc(nameOf(p.partnerId)):''}${p.pin!=null?' · 📌':''}</span></span>
       ${p.wonLast?'<span class="tag w">W</span>':''}
       <button class="btn ghost small" data-action="break" data-pid="${p.id}">💤 Break</button>
     </div>`).join('') || '<p class="subtle" style="padding:8px 4px">Queue is empty — everyone is on court.</p>';
@@ -465,12 +539,12 @@ function renderPlay(){
     </div>`).join('');
 
   $app.innerHTML = courtsHtml + `
-    <div class="card">
+    <div class="card" id="queueCard">
       <h3 style="margin-bottom:6px">🏓 Paddle queue</h3>
       <p class="subtle">Fewest games first · recent winners get the tiebreak · then longest wait.</p>
       ${queueHtml}
       ${breakHtml? `<h3 style="margin:14px 0 4px; font-size:14px; color:var(--dim)">On break</h3>${breakHtml}`:''}
-      <p class="hint">💡 Tap a player on a court, then tap another player (on court or in queue) to swap them — works before or during a match. 🎲 Shuffle re-randomizes teams.</p>
+      <p class="hint">💡 Every name card drags: drop a queued player onto a team to put them in, drag a court player to the queue to bench them (next up subs in), or reorder the queue by dropping a card onto another spot (📌 = manually placed; clears when they play). Tap-tap works too. 🎲 Shuffle keeps 🔗 partners together.</p>
     </div>`;
 }
 
@@ -478,13 +552,14 @@ function renderPlay(){
 function renderPlayers(){
   const active = state.players.filter(p=>p.status!=='out');
   const rows = active.slice().sort((a,b)=>b.games-a.games || b.wins-a.wins).map(p=>{
-    const last = p.history[0];
+    const last = (p.history||[])[0];
     return `<tr>
-      <td><b>${esc(p.name)}</b>${p.late?' <span class="tag zz">⏰ late</span>':''}<br><span class="subtle" style="font-size:11.5px">${last? `last with ${esc(last.teammate)}${last.score? ' · '+last.score : ''}` : '—'}</span></td>
+      <td><b>${esc(p.name)}</b>${p.late?' <span class="tag zz">⏰ late</span>':''}<br><span class="subtle" style="font-size:11.5px">${p.partnerId? '🔗 '+esc(nameOf(p.partnerId))+' · ':''}${last? `last with ${esc(last.teammate)}${last.score? ' · '+last.score : ''}` : '—'}</span></td>
       <td>${p.games}</td>
       <td>${p.wins}–${p.losses}</td>
       <td><span class="st ${p.status}">${p.status}</span></td>
       <td style="text-align:right; white-space:nowrap">
+        <button class="btn ghost small" data-action="partner" data-pid="${p.id}">🔗</button>
         ${p.status!=='playing' ? `<button class="btn ghost small" data-action="break" data-pid="${p.id}">${p.status==='break'?'▶':'💤'}</button>
         <button class="btn danger small" data-action="remove" data-pid="${p.id}">✕</button>`:''}
       </td></tr>`;
@@ -541,12 +616,20 @@ function renderLog(){
     <div class="card">
       <h3>📡 Live sharing</h3>
       ${live && live.on ? `
-        <p class="subtle" style="margin:6px 0 10px">Sharing live — players can watch the queue, courts and standings at your link.</p>
+        <p class="subtle" style="margin:6px 0 10px">Sharing live — players can ${live.mode==='open'?'watch <b>and edit</b>':'watch'} the queue, courts and standings at your link.</p>
         <div class="row">
-          <button class="btn primary grow" data-action="live-share">📤 Share live link</button>
+          <button class="btn grow" data-action="live-mode" data-mode="locked" ${live.mode!=='open'?'style="border:1px solid var(--accent); color:var(--accent)"':''}>🔒 View only</button>
+          <button class="btn grow" data-action="live-mode" data-mode="open" ${live.mode==='open'?'style="border:1px solid var(--accent); color:var(--accent)"':''}>✏️ Open editing</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary grow" data-action="live-qr">🔳 Show QR code</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn grow" data-action="live-share">📤 Share link</button>
           <button class="btn grow" data-action="live-copy">📋 Copy</button>
         </div>
-        <div class="row" style="margin-top:8px"><button class="btn danger grow" data-action="live-stop">Stop sharing</button></div>`
+        <div class="row" style="margin-top:8px"><button class="btn danger grow" data-action="live-stop">Stop sharing</button></div>
+        ${live.mode==='open'?'<p class="hint">Open editing: anyone with the link can move players, set teams, start and finish matches — every change syncs to everyone.</p>':''}`
       : live && live.dbUrl ? `
         <p class="subtle" style="margin:6px 0 10px">Ready to go live using your saved database.</p>
         <button class="btn primary" style="width:100%" data-action="live-start">🔴 Go live</button>`
@@ -600,26 +683,58 @@ function liveSave(){ try{ localStorage.setItem(LIVE_KEY, JSON.stringify(live)); 
 function liveUrl(){ return live.dbUrl.replace(/\/$/,'')+'/sessions/'+live.id+'.json'; }
 function liveLink(){ return location.origin+location.pathname+'#live='+live.id+'&db='+encodeURIComponent(live.dbUrl.replace(/\/$/,'')); }
 let pushT = null;
+const clientId = Math.random().toString(36).slice(2,10);
 function pushLive(){
   if(!live || !live.on || !live.id || !state || state.screen==='setup') return;
   clearTimeout(pushT);
   pushT = setTimeout(()=>{
-    const payload = {...state, undoStack:[], t:Date.now(),
-      players: state.players.map(p=>({id:p.id,name:p.name,games:p.games,base:p.base,wins:p.wins,losses:p.losses,wonLast:p.wonLast,status:p.status,queuedAt:p.queuedAt,late:!!p.late}))};
+    state.rev = (state.rev||0)+1;
+    const payload = {...state, undoStack:[], t:Date.now(), src:clientId,
+      mode: IS_VIEWER ? (state.mode||'locked') : (live.mode||'locked')};
     fetch(liveUrl(), {method:'PUT', body: JSON.stringify(payload)}).catch(()=>{});
-  }, 600);
+  }, 400);
 }
+function normalizeState(s){
+  s.players = s.players||[]; s.courts = s.courts||[]; s.matches = s.matches||[]; s.undoStack = s.undoStack||[];
+  s.players.forEach(p=>{ p.history = p.history||[]; });
+  s.courts.forEach(c=>{ if(c.teams && (!c.teams[0] || !c.teams[1])) c.teams = null; });
+  return s;
+}
+function adoptRemote(data){
+  if(!data || data.src===clientId) return;
+  if((data.rev||0) <= ((state && state.rev)||0)) return;
+  adopting = true;
+  state = normalizeState(data);
+  viewerLastT = data.t||Date.now();
+  if(!IS_VIEWER){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} }
+  render();
+  adopting = false;
+}
+let hostES = null;
+function hostSubscribe(){
+  if(hostES || !live || !live.on || IS_VIEWER) return;
+  try{
+    hostES = new EventSource(liveUrl());
+    hostES.addEventListener('put', e=>{
+      try{ const d = JSON.parse(e.data); if(d.path==='/' && d.data) adoptRemote(d.data); }catch(err){}
+    });
+  }catch(e){}
+}
+function hostUnsubscribe(){ if(hostES){ hostES.close(); hostES = null; } }
 /* viewer */
 let viewerLastT = 0;
 function startViewer(db, id){
+  IS_VIEWER = true;
+  live = { dbUrl: db.replace(/\/$/,''), id: id, on: true };
+  state = null;
   document.getElementById('btnNewSession').classList.add('hidden');
   $tabs.classList.add('hidden');
   $app.innerHTML = '<div class="card"><p class="subtle">Connecting to live session…</p></div>';
-  const url = db.replace(/\/$/,'')+'/sessions/'+id+'.json';
+  const url = liveUrl();
   const apply = data => {
-    if(!data){ $app.innerHTML='<div class="card"><p class="subtle">Live session ended or not found. Ask the organizer for a fresh link.</p></div>'; return; }
-    data.players = data.players||[]; data.courts = data.courts||[]; data.matches = data.matches||[]; data.undoStack = [];
-    state = data; viewerLastT = data.t||Date.now(); renderViewer();
+    if(!data){ if(!state) $app.innerHTML='<div class="card"><p class="subtle">Live session ended or not found. Ask the organizer for a fresh link.</p></div>'; return; }
+    if(!state){ state = normalizeState(data); viewerLastT = data.t||Date.now(); render(); }
+    else adoptRemote(data);
   };
   const poll = ()=>{ fetch(url).then(r=>r.json()).then(apply).catch(()=>{}); };
   let pollT = null;
@@ -630,6 +745,18 @@ function startViewer(db, id){
     es.onerror = ()=>{ if(!pollT) pollT = setInterval(poll, 5000); };
   }catch(e){ pollT = setInterval(poll, 5000); }
   poll();
+}
+function renderOpenViewer(){
+  $tabs.classList.add('hidden');
+  document.getElementById('btnNewSession').classList.add('hidden');
+  ui.tab = 'play';
+  renderPlay();
+  const u = new Date(viewerLastT);
+  $app.insertAdjacentHTML('afterbegin', `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px">
+      <b style="color:var(--accent)">● LIVE · you can edit</b>
+      <span class="subtle">synced ${u.getHours()%12||12}:${String(u.getMinutes()).padStart(2,'0')}</span>
+    </div>`);
 }
 function vchip(pid){
   const p = byId(pid);
@@ -651,7 +778,7 @@ function renderViewer(){
   const q = prioritySort(queuedPlayers());
   const queueHtml = q.map((p,i)=>`
     <div class="qitem ${i<4?'next':''}"><span class="qpos">${i+1}</span>
-      <span class="qname">${esc(p.name)}<span class="meta"> · ${p.games} game${p.games===1?'':'s'}${p.wonLast?' · won last':''}${p.late?' · ⏰ late':''}</span></span>
+      <span class="qname">${esc(p.name)}<span class="meta"> · ${p.games} game${p.games===1?'':'s'}${p.wonLast?' · won last':''}${p.late?' · ⏰ late':''}${p.partnerId?' · 🔗 '+esc(nameOf(p.partnerId)):''}${p.pin!=null?' · 📌':''}</span></span>
     </div>`).join('') || '<p class="subtle" style="padding:8px 4px">Queue is empty — everyone is on court.</p>';
   const rank = rankedPlayers(), medals=['🥇','🥈','🥉'];
   const standings = rank.map((p,i)=>`<tr><td style="width:36px">${medals[i]||(i+1)+'.'}</td><td><b>${esc(p.name)}</b>${p.late?' <span class="tag zz">⏰</span>':''}</td><td>${p.wins}–${p.losses}</td><td class="subtle">${p.games} games</td></tr>`).join('');
@@ -725,6 +852,51 @@ function renderSummary(){
     </div>`;
 }
 
+/* ---------- partner modal ---------- */
+function openPartnerModal(pid){
+  const p = byId(pid); if(!p) return;
+  const options = state.players.filter(x=>x.status!=='out' && x.id!==pid);
+  $modalHost.innerHTML = `
+    <div class="overlay" data-action="modal-bg">
+      <div class="modal">
+        <h3>🔗 Fixed partner for ${esc(p.name)}</h3>
+        <p class="subtle">Partners always land on the same team and go on court together.</p>
+        <div style="max-height:50vh; overflow:auto; margin-top:12px">
+          ${options.map(x=>`<button class="btn" style="width:100%; margin-bottom:6px; text-align:left; ${x.id===p.partnerId?'border:1px solid var(--accent); color:var(--accent);':''}" data-action="set-partner" data-pid="${pid}" data-mate="${x.id}">${esc(x.name)}${x.id===p.partnerId?' ✓':''}${x.partnerId && x.id!==p.partnerId ? ' <span class="subtle">(🔗 '+esc(nameOf(x.partnerId))+')</span>':''}</button>`).join('')}
+        </div>
+        <div class="row" style="margin-top:10px">
+          ${p.partnerId? `<button class="btn danger grow" data-action="set-partner" data-pid="${pid}" data-mate="">Unlink</button>`:''}
+          <button class="btn ghost grow" data-action="modal-close">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ---------- QR modal ---------- */
+function openQrModal(){
+  const url = liveLink();
+  $modalHost.innerHTML = `
+    <div class="overlay" data-action="modal-bg">
+      <div class="modal" style="text-align:center">
+        <h3>Scan to ${live.mode==='open'?'watch & edit':'watch live'}</h3>
+        <p class="subtle" style="margin:6px 0 12px">Point a phone camera here — the live session opens right in their browser.</p>
+        <div id="qrBox" style="background:#fff; border-radius:12px; padding:14px; display:inline-flex; align-items:center; justify-content:center; min-width:248px; min-height:248px"><span style="color:#888; font-size:13px">Generating…</span></div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn grow" data-action="live-copy">📋 Copy link</button>
+          <button class="btn ghost grow" data-action="modal-close">Close</button>
+        </div>
+      </div>
+    </div>`;
+  const box = document.getElementById('qrBox');
+  const make = ()=>{ box.innerHTML=''; new QRCode(box, {text:url, width:220, height:220, correctLevel:QRCode.CorrectLevel.M}); };
+  const fallback = ()=>{ box.innerHTML = '<img width="220" height="220" alt="QR code" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data='+encodeURIComponent(url)+'">'; };
+  if(window.QRCode){ make(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+  s.onload = make; s.onerror = fallback;
+  document.head.appendChild(s);
+}
+
 /* ---------- finish modal ---------- */
 function openFinishModal(courtId){
   const c = state.courts.find(x=>x.id===courtId); if(!c||!c.teams) return;
@@ -794,6 +966,13 @@ function doAction(action, el){
     }
     case 'modal-bg': if(event && event.target===el) closeModal(); return;
     case 'modal-close': closeModal(); return;
+    case 'partner': openPartnerModal(el.dataset.pid); return;
+    case 'set-partner': {
+      const pid = el.dataset.pid, mate = el.dataset.mate;
+      if(mate && byId(pid) && byId(pid).partnerId===mate){ setPartner(pid, null); }
+      else setPartner(pid, mate || null);
+      closeModal(); save(); render(); toast('Partners updated'); return;
+    }
     case 'break': {
       if(!toggleBreak(el.dataset.pid)) toast('Sub them out of the court first');
       save(); animatedRender(); return;
@@ -842,10 +1021,16 @@ function doAction(action, el){
     case 'live-start':
       if(!live || !live.dbUrl) return;
       if(!live.id) live.id = Math.random().toString(36).slice(2,10);
-      live.on = true; liveSave(); pushLive(); render(); toast('You are live — share the link'); return;
+      if(!live.mode) live.mode = 'locked';
+      live.on = true; liveSave(); pushLive(); hostSubscribe(); render(); toast('You are live — share the link'); return;
     case 'live-stop':
+      hostUnsubscribe();
       if(live){ fetch(liveUrl(), {method:'DELETE'}).catch(()=>{}); live.on = false; live.id = null; liveSave(); }
       render(); toast('Live sharing stopped'); return;
+    case 'live-mode':
+      live.mode = el.dataset.mode; liveSave(); pushLive(); render();
+      toast(live.mode==='open' ? 'Anyone with the link can now edit' : 'Link is now view-only'); return;
+    case 'live-qr': openQrModal(); return;
     case 'live-share': {
       const url = liveLink();
       if(navigator.share){ navigator.share({title:'Salitan — live', url}).catch(()=>{}); }
@@ -882,6 +1067,14 @@ document.addEventListener('click', e=>{
 /* ---------- tap-to-swap + drag ---------- */
 function trySwap(aId, bId){
   const A=byId(aId), B=byId(bId);
+  if(!A || !B) return;
+  if(!findSlot(aId) && !findSlot(bId)){
+    if(A.status==='queued' && B.status==='queued' && reorderQueue(aId, bId)){
+      ui.selected=null; save(); animatedRender();
+      toast(`${A.name} is now #${prioritySort(queuedPlayers()).findIndex(p=>p.id===aId)+1} in queue`);
+    } else { toast("Can't move that player"); ui.selected=null; render(); }
+    return;
+  }
   if(swapPlayers(aId,bId)){ ui.selected=null; save(); animatedRender(); toast(`Swapped ${A.name} ↔ ${B.name}`); }
   else { toast('Pick one player on a court'); ui.selected=null; render(); }
 }
@@ -889,33 +1082,81 @@ let drag=null;
 document.addEventListener('pointerdown', e=>{
   const chip = e.target.closest('[data-chip]');
   if(!chip) return;
+  e.preventDefault();
   drag = { pid:chip.dataset.chip, x:e.clientX, y:e.clientY, el:chip, moved:false, ghost:null };
 });
+function dropTarget(x, y, pid){
+  const under = document.elementFromPoint(x, y);
+  if(!under) return null;
+  const nearestChip = root => {
+    const chips = [...root.querySelectorAll('[data-chip]')].filter(c=>c.dataset.chip!==pid);
+    let best=null, bd=Infinity;
+    for(const c of chips){
+      const r=c.getBoundingClientRect();
+      const d=Math.hypot(x-(r.left+r.width/2), y-(r.top+r.height/2));
+      if(d<bd){ bd=d; best=c; }
+    }
+    return best;
+  };
+  const chip = under.closest('[data-chip]');
+  if(chip) return chip.dataset.chip!==pid ? {type:'chip', el:chip} : null;
+  const row = under.closest('.qitem');
+  if(row){
+    const c = row.querySelector('[data-chip]');
+    return (c && c.dataset.chip!==pid) ? {type:'chip', el:c} : null;
+  }
+  const team = under.closest('.team');
+  if(team){
+    const slot = findSlot(pid);
+    if(slot && team.dataset.court && slot.court.id===+team.dataset.court && slot.ti===+team.dataset.team) return null; // own team
+    const best = nearestChip(team);
+    return best ? {type:'chip', el:best} : null;
+  }
+  const court = under.closest('.court');
+  if(court){
+    const slot = findSlot(pid);
+    if(slot && court.querySelector(`[data-chip="${pid}"]`)) return null; // own court, ambiguous
+    const best = nearestChip(court);
+    return best ? {type:'chip', el:best} : null;
+  }
+  const qc = under.closest('#queueCard');
+  if(qc && findSlot(pid)) return {type:'queue', el:qc}; // court player -> bench (next up subs in)
+  return null;
+}
+function clearDropHints(){
+  document.querySelectorAll('.drophint').forEach(x=>x.classList.remove('drophint'));
+  document.querySelectorAll('.dropzone').forEach(x=>x.classList.remove('dropzone'));
+}
 document.addEventListener('pointermove', e=>{
   if(!drag) return;
   if(!drag.moved && Math.hypot(e.clientX-drag.x, e.clientY-drag.y)>12){
     drag.moved=true;
     const g = drag.el.cloneNode(true);
-    g.classList.add('ghost'); document.body.appendChild(g); drag.ghost=g;
+    g.classList.add('dragghost'); document.body.appendChild(g); drag.ghost=g;
   }
   if(drag.moved){
     e.preventDefault();
     drag.ghost.style.left=(e.clientX-65)+'px'; drag.ghost.style.top=(e.clientY-30)+'px';
-    document.querySelectorAll('.drophint').forEach(x=>x.classList.remove('drophint'));
-    const under = document.elementFromPoint(e.clientX, e.clientY);
-    const target = under && under.closest('[data-chip]');
-    if(target && target.dataset.chip!==drag.pid) target.classList.add('drophint');
+    clearDropHints();
+    const t = dropTarget(e.clientX, e.clientY, drag.pid);
+    if(t) t.el.classList.add(t.type==='chip' ? 'drophint' : 'dropzone');
   }
 },{passive:false});
 document.addEventListener('pointerup', e=>{
   if(!drag) return;
   const d=drag; drag=null;
   if(d.ghost) d.ghost.remove();
-  document.querySelectorAll('.drophint').forEach(x=>x.classList.remove('drophint'));
+  clearDropHints();
   if(d.moved){
-    const under = document.elementFromPoint(e.clientX, e.clientY);
-    const target = under && under.closest('[data-chip]');
-    if(target && target.dataset.chip!==d.pid) trySwap(d.pid, target.dataset.chip);
+    const t = dropTarget(e.clientX, e.clientY, d.pid);
+    if(t){
+      if(t.type==='chip'){ trySwap(d.pid, t.el.dataset.chip); }
+      else {
+        const q = prioritySort(queuedPlayers());
+        if(!q.length) toast('No one waiting to sub in');
+        else trySwap(d.pid, q[0].id);
+      }
+    }
   } else {
     // tap: select / swap
     const pid = d.pid;
@@ -943,6 +1184,7 @@ if(vh.get('live') && vh.get('db')){
 } else {
   load();
   if(!state){ state={screen:'setup'}; }
+  if(live && live.on && state.screen!=='setup'){ hostSubscribe(); }
   render();
 }
 </script>
