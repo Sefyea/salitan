@@ -58,6 +58,7 @@
   .chip.drophint{outline:2px dashed var(--accent); outline-offset:1px;}
   .chip.vacant{border-style:dashed; background:transparent; color:var(--dim); font-weight:400; cursor:pointer;}
   .dropzone{outline:2px dashed var(--accent); outline-offset:2px; border-radius:14px;}
+  .dragghost.benchhint{border-color:var(--danger); color:var(--danger);}
   .dragghost{position:fixed; z-index:99; pointer-events:none; opacity:.92; width:150px; background:var(--card2); border:1px solid var(--accent); border-radius:10px; padding:10px; text-align:center; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.5);}
   .court .actions{display:flex; gap:8px; margin-top:12px;}
   .court .actions .btn{flex:1;}
@@ -263,9 +264,31 @@ function fillCourts(){
   }
 }
 
+function takeFromQueue(n){
+  const q = prioritySort(queuedPlayers());
+  const out = []; const inOut = id => out.some(p=>p.id===id);
+  for(const p of q){
+    if(out.length>=n) break;
+    if(inOut(p.id)) continue;
+    const mate = p.partnerId ? q.find(x=>x.id===p.partnerId && !inOut(x.id)) : null;
+    if(mate){ if(n-out.length>=2) out.push(p, mate); }
+    else out.push(p);
+  }
+  for(const p of q){ if(out.length>=n) break; if(!inOut(p.id)) out.push(p); }
+  return out.slice(0, n);
+}
 function shuffleTeams(courtId){
   const c = state.courts.find(x=>x.id===courtId);
-  if(c && c.teams && courtPlayers(c).length===4) c.teams = teamsFor(courtPlayers(c));
+  if(!c || !c.teams) return;
+  const ids = courtPlayers(c);
+  if(ids.length<4){
+    takeFromQueue(4-ids.length).forEach(p=>{ p.status='playing'; p.pin=null; ids.push(p.id); });
+  }
+  if(ids.length===4){ c.teams = teamsFor(ids); }
+  else {
+    const s = shuffleArr(ids);
+    c.teams = [[s[0]||'', s[1]||''], [s[2]||'', s[3]||'']];
+  }
 }
 
 function startMatch(courtId){
@@ -316,7 +339,9 @@ function removeFromCourt(pid){
   slot.court.teams[slot.ti][slot.pi] = '';
   p.status='queued'; p.queuedAt=(++state.tick); p.pin=null;
   const c = slot.court;
-  if(courtPlayers(c).length===0){ c.phase='idle'; c.teams=null; c.startedAt=null; fillCourts(); }
+  /* Court is held open (even fully empty) until Shuffle fills it or players
+     are dropped in. A playing court emptied mid-match falls back to staging. */
+  if(courtPlayers(c).length===0 && c.phase==='playing'){ c.phase='staging'; c.startedAt=null; }
   return true;
 }
 /* Put a player (from queue or another slot) into a specific open slot */
@@ -576,7 +601,7 @@ function renderPlay(){
       <p class="subtle">Fewest games first · recent winners get the tiebreak · then longest wait.</p>
       ${queueHtml}
       ${breakHtml? `<h3 style="margin:14px 0 4px; font-size:14px; color:var(--dim)">On break</h3>${breakHtml}`:''}
-      <p class="hint">💡 Every name card drags: drop a queued player onto a team to put them in, drag a court player to the queue to bench them (their slot stays open until someone's dropped in), or reorder the queue by dropping a card onto another spot (📌 = manually placed; clears when they play). Tap-tap works too. Tap 🔗 on a queue card to set a fixed partner, 💤 for a break. 🎲 Shuffle keeps 🔗 partners together.</p>
+      <p class="hint">💡 Every name card drags: drop a queued player onto a team to put them in, drag a court player anywhere off the court to bench them (their slot stays open; 🎲 Shuffle fills open slots from the queue), or reorder the queue by dropping a card onto another spot (📌 = manually placed; clears when they play). Tap-tap works too. Tap 🔗 on a queue card to set a fixed partner, 💤 for a break. 🎲 Shuffle keeps 🔗 partners together.</p>
     </div>`;
 }
 
@@ -1189,6 +1214,7 @@ document.addEventListener('pointermove', e=>{
     clearDropHints();
     const t = dropTarget(e.clientX, e.clientY, drag.pid);
     if(t) t.el.classList.add(t.type==='chip' ? 'drophint' : 'dropzone');
+    drag.ghost.classList.toggle('benchhint', !t && !!findSlot(drag.pid));
   }
 },{passive:false});
 document.addEventListener('pointerup', e=>{
@@ -1204,6 +1230,8 @@ document.addEventListener('pointerup', e=>{
         if(placeVacant(d.pid, +t.el.dataset.court, +t.el.dataset.team, +t.el.dataset.pos)){ ui.selected=null; save(); animatedRender(); toast(`${nameOf(d.pid)} is in`); }
       }
       else if(removeFromCourt(d.pid)){ save(); animatedRender(); toast(`${nameOf(d.pid)} back in queue — slot left open`); }
+    } else if(findSlot(d.pid) && removeFromCourt(d.pid)){
+      save(); animatedRender(); toast(`${nameOf(d.pid)} back in queue — slot left open`);
     }
   } else {
     // tap: select / swap
