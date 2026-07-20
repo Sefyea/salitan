@@ -151,7 +151,7 @@ let state = null;
 
 function freshState(names, courtCount){
   const s = {
-    screen:'main', startedAt:Date.now(), rev:0, tick:0, matchSeq:0,
+    screen:'main', startedAt:Date.now(), sid:Math.random().toString(36).slice(2,10), rev:0, tick:0, matchSeq:0,
     players:[], courts:[], matches:[], undoStack:[]
   };
   names.forEach(n => s.players.push(mkPlayer(s, n, 0)));
@@ -789,7 +789,7 @@ function startViewer(db, id){
   $app.innerHTML = '<div class="card"><p class="subtle">Connecting to live session…</p></div>';
   const url = liveUrl();
   const apply = data => {
-    if(!data){ if(!state) $app.innerHTML='<div class="card"><p class="subtle">Live session ended or not found. Ask the organizer for a fresh link.</p></div>'; return; }
+    if(!data){ state = null; $app.innerHTML='<div class="card"><p class="subtle">This live session has ended. Ask the organizer for the new link or QR code.</p></div>'; return; }
     if(!state){ state = normalizeState(data); viewerLastT = data.t||Date.now(); render(); }
     else adoptRemote(data);
   };
@@ -1088,7 +1088,8 @@ function doAction(action, el){
     }
     case 'live-start':
       if(!live || !live.dbUrl) return;
-      if(!live.id) live.id = Math.random().toString(36).slice(2,10);
+      if(!state.sid) state.sid = Math.random().toString(36).slice(2,10); // older saved sessions
+      live.id = state.sid;
       if(!live.mode) live.mode = 'locked';
       live.on = true; liveSave(); pushLive(); hostSubscribe(); render(); toast('You are live — share the link'); return;
     case 'live-stop':
@@ -1120,7 +1121,10 @@ function doAction(action, el){
       if(navigator.clipboard){ navigator.clipboard.writeText(shareText()).then(()=>toast('Summary copied')); }
       return;
     case 'new-session': {
-      if(confirm('Start a fresh session? Current players, queue and match log will be cleared.')){
+      if(confirm('Start a fresh session? Current players, queue and match log will be cleared, and any shared live links will stop working.')){
+        hostUnsubscribe();
+        if(live && live.id){ fetch(liveUrl(), {method:'DELETE'}).catch(()=>{}); }
+        if(live){ live.on=false; live.id=null; liveSave(); }
         localStorage.removeItem(LS_KEY); state=null; ui.setupNames=[]; ui.selected=null; ui.tab='play'; render();
       } return;
     }
