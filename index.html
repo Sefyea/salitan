@@ -808,6 +808,11 @@ function renderOpenViewer(){
   document.getElementById('btnNewSession').classList.add('hidden');
   ui.tab = 'play';
   renderPlay();
+  const rank = rankedPlayers(), medals=['🥇','🥈','🥉'];
+  const standings = rank.map((p,i)=>`<tr><td style="width:36px">${medals[i]||(i+1)+'.'}</td><td><b>${esc(p.name)}</b>${p.late?' <span class="tag zz">⏰</span>':''}</td><td>${p.wins}–${p.losses}</td><td class="subtle">${p.games} games</td></tr>`).join('');
+  $app.insertAdjacentHTML('beforeend', `
+    <div class="card"><h3 style="margin-bottom:8px">Standings</h3>${standings? `<table>${standings}</table>` : '<p class="subtle">No games finished yet.</p>'}</div>
+    <div class="card"><h3 style="margin-bottom:8px">Match history</h3>${matchListHtml()||'<p class="subtle">No matches yet.</p>'}</div>`);
   const u = new Date(viewerLastT);
   $app.insertAdjacentHTML('afterbegin', `
     <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px">
