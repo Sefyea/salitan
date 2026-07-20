@@ -56,6 +56,7 @@
   .chip small{display:block; font-weight:400; color:var(--dim); font-size:11px; margin-top:1px;}
   .chip.sel{outline:2px solid var(--accent); outline-offset:1px;}
   .chip.drophint{outline:2px dashed var(--accent); outline-offset:1px;}
+  .chip.vacant{border-style:dashed; background:transparent; color:var(--dim); font-weight:400; cursor:pointer;}
   .dropzone{outline:2px dashed var(--accent); outline-offset:2px; border-radius:14px;}
   .dragghost{position:fixed; z-index:99; pointer-events:none; opacity:.92; width:150px; background:var(--card2); border:1px solid var(--accent); border-radius:10px; padding:10px; text-align:center; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.5);}
   .court .actions{display:flex; gap:8px; margin-top:12px;}
@@ -166,7 +167,7 @@ function mkCourt(i){ return { id:i, phase:'idle', teams:null, startedAt:null }; 
 function byId(id){ return state.players.find(p=>p.id===id); }
 function nameOf(id){ const p=byId(id); return p?p.name:'?'; }
 function effGames(p){ return p.games + p.base; }
-function courtPlayers(c){ return c.teams ? [...c.teams[0], ...c.teams[1]] : []; }
+function courtPlayers(c){ return c.teams ? [...c.teams[0], ...c.teams[1]].filter(Boolean) : []; }
 
 /* Priority: manual pins first (by pinned order), then fewest (effective) games →
    recent winners → waited longest. Pins are set by drag-reordering the queue and
@@ -264,12 +265,13 @@ function fillCourts(){
 
 function shuffleTeams(courtId){
   const c = state.courts.find(x=>x.id===courtId);
-  if(c && c.teams) c.teams = teamsFor(courtPlayers(c));
+  if(c && c.teams && courtPlayers(c).length===4) c.teams = teamsFor(courtPlayers(c));
 }
 
 function startMatch(courtId){
   const c = state.courts.find(x=>x.id===courtId);
-  if(c && c.phase==='staging'){ c.phase='playing'; c.startedAt=Date.now(); }
+  if(!c || c.phase!=='staging' || courtPlayers(c).length<4) return false;
+  c.phase='playing'; c.startedAt=Date.now(); return true;
 }
 
 /* Find where a player currently sits on any court: {court, ti, pi} or null */
@@ -307,6 +309,29 @@ function subIn(slot, onCourt, fromQueue){
   return true;
 }
 
+/* Bench a court player without a replacement — their slot stays open */
+function removeFromCourt(pid){
+  const slot = findSlot(pid); if(!slot) return false;
+  const p = byId(pid); if(!p) return false;
+  slot.court.teams[slot.ti][slot.pi] = '';
+  p.status='queued'; p.queuedAt=(++state.tick); p.pin=null;
+  const c = slot.court;
+  if(courtPlayers(c).length===0){ c.phase='idle'; c.teams=null; c.startedAt=null; fillCourts(); }
+  return true;
+}
+/* Put a player (from queue or another slot) into a specific open slot */
+function placeVacant(pid, courtId, ti, pi){
+  const c = state.courts.find(x=>x.id===courtId);
+  if(!c || !c.teams || c.teams[ti][pi]) return false;
+  const p = byId(pid); if(!p) return false;
+  const slot = findSlot(pid);
+  if(slot){ slot.court.teams[slot.ti][slot.pi] = ''; }
+  else if(p.status!=='queued') return false;
+  c.teams[ti][pi] = pid;
+  p.status='playing'; p.pin=null;
+  return true;
+}
+
 function pushUndo(){
   state.undoStack.push(JSON.stringify({...state, undoStack:[]}));
   if(state.undoStack.length>10) state.undoStack.shift();
@@ -325,7 +350,7 @@ function finishMatch(courtId, winnerIdx, sa, sb){
   if(!c || !c.teams) return;
   pushUndo();
   const rec = { id:(++state.matchSeq), court:c.id,
-    a:c.teams[0].map(nameOf), b:c.teams[1].map(nameOf),
+    a:c.teams[0].filter(Boolean).map(nameOf), b:c.teams[1].filter(Boolean).map(nameOf),
     sa:(sa??null), sb:(sb??null), w:winnerIdx, t:Date.now() };
   state.matches.unshift(rec);
   for(let ti=0; ti<2; ti++){
@@ -334,8 +359,8 @@ function finishMatch(courtId, winnerIdx, sa, sb){
       const p = byId(pid); if(!p) continue;
       p.games++; won ? p.wins++ : p.losses++;
       p.wonLast = won;
-      const mateId = c.teams[ti].find(x=>x!==pid);
-      (p.history = p.history||[]).unshift({ m:rec.id, teammate:nameOf(mateId), won,
+      const mateId = c.teams[ti].find(x=>x && x!==pid);
+      (p.history = p.history||[]).unshift({ m:rec.id, teammate: mateId ? nameOf(mateId) : '—', won,
         score:(sa!=null&&sb!=null) ? (ti===0? sa+'–'+sb : sb+'–'+sa) : null });
       p.status='queued'; p.queuedAt=(++state.tick); p.pin=null;
     }
@@ -496,6 +521,11 @@ function chipHtml(pid, extra=''){
   return `<div class="chip ${ui.selected===pid?'sel':''} ${extra}" data-chip="${pid}">
     ${esc(p.name)}<small>${p.games}g · ${p.wins}W${p.late?' · ⏰':''}</small></div>`;
 }
+function slotHtml(c, ti, pi){
+  const id = c.teams[ti][pi];
+  if(id) return chipHtml(id);
+  return `<div class="chip vacant" data-vacant="1" data-action="fill-vacant" data-court="${c.id}" data-team="${ti}" data-pos="${pi}">＋<small>open slot</small></div>`;
+}
 function renderPlay(){
   const courtsHtml = state.courts.map(c=>{
     let body='';
@@ -505,9 +535,9 @@ function renderPlay(){
     } else {
       body = `
         <div class="teams">
-          <div class="team a" data-court="${c.id}" data-team="0"><div class="tname">Team A</div>${c.teams[0].map(id=>chipHtml(id)).join('')}</div>
+          <div class="team a" data-court="${c.id}" data-team="0"><div class="tname">Team A</div>${c.teams[0].map((id,pi)=>slotHtml(c,0,pi)).join('')}</div>
           <div class="vs">VS</div>
-          <div class="team b" data-court="${c.id}" data-team="1"><div class="tname">Team B</div>${c.teams[1].map(id=>chipHtml(id)).join('')}</div>
+          <div class="team b" data-court="${c.id}" data-team="1"><div class="tname">Team B</div>${c.teams[1].map((id,pi)=>slotHtml(c,1,pi)).join('')}</div>
         </div>
         <div class="actions">
           ${c.phase==='staging'
@@ -546,7 +576,7 @@ function renderPlay(){
       <p class="subtle">Fewest games first · recent winners get the tiebreak · then longest wait.</p>
       ${queueHtml}
       ${breakHtml? `<h3 style="margin:14px 0 4px; font-size:14px; color:var(--dim)">On break</h3>${breakHtml}`:''}
-      <p class="hint">💡 Every name card drags: drop a queued player onto a team to put them in, drag a court player to the queue to bench them (next up subs in), or reorder the queue by dropping a card onto another spot (📌 = manually placed; clears when they play). Tap-tap works too. Tap 🔗 on a queue card to set a fixed partner, 💤 for a break. 🎲 Shuffle keeps 🔗 partners together.</p>
+      <p class="hint">💡 Every name card drags: drop a queued player onto a team to put them in, drag a court player to the queue to bench them (their slot stays open until someone's dropped in), or reorder the queue by dropping a card onto another spot (📌 = manually placed; clears when they play). Tap-tap works too. Tap 🔗 on a queue card to set a fixed partner, 💤 for a break. 🎲 Shuffle keeps 🔗 partners together.</p>
     </div>`;
 }
 
@@ -761,6 +791,7 @@ function renderOpenViewer(){
     </div>`);
 }
 function vchip(pid){
+  if(!pid) return '<div class="chip vacant"><small>open slot</small></div>';
   const p = byId(pid);
   return `<div class="chip" style="touch-action:auto">${esc(p?p.name:'?')}<small>${p? p.games+'g · '+p.wins+'W' : ''}${p&&p.late?' · ⏰':''}</small></div>`;
 }
@@ -902,7 +933,7 @@ function openQrModal(){
 /* ---------- finish modal ---------- */
 function openFinishModal(courtId){
   const c = state.courts.find(x=>x.id===courtId); if(!c||!c.teams) return;
-  const an = c.teams[0].map(nameOf).join(' & '), bn = c.teams[1].map(nameOf).join(' & ');
+  const an = c.teams[0].filter(Boolean).map(nameOf).join(' & '), bn = c.teams[1].filter(Boolean).map(nameOf).join(' & ');
   $modalHost.innerHTML = `
     <div class="overlay" data-action="modal-bg">
       <div class="modal">
@@ -953,7 +984,17 @@ function doAction(action, el){
     }
     case 'tab': ui.tab = el.dataset.tab; ui.selected=null; render(); return;
     case 'shuffle': shuffleTeams(+el.dataset.court); save(); animatedRender(); return;
-    case 'start': startMatch(+el.dataset.court); save(); render(); return;
+    case 'start':
+      if(startMatch(+el.dataset.court)){ save(); render(); }
+      else toast('Fill all 4 slots first');
+      return;
+    case 'fill-vacant': {
+      if(!ui.selected){ toast('Tap a player first, then the open slot'); return; }
+      if(placeVacant(ui.selected, +el.dataset.court, +el.dataset.team, +el.dataset.pos)){
+        const n = nameOf(ui.selected); ui.selected=null; save(); animatedRender(); toast(`${n} is in`);
+      } else { toast("Couldn't place there"); }
+      return;
+    }
     case 'finish': if(!finishing.has(+el.dataset.court)) openFinishModal(+el.dataset.court); return;
     case 'win': {
       const sa = document.getElementById('sa').value, sb = document.getElementById('sb').value;
@@ -1100,6 +1141,8 @@ function dropTarget(x, y, pid){
     }
     return best;
   };
+  const vac = under.closest('[data-vacant]');
+  if(vac) return {type:'vacant', el:vac};
   const chip = under.closest('[data-chip]');
   if(chip) return chip.dataset.chip!==pid ? {type:'chip', el:chip} : null;
   const row = under.closest('.qitem');
@@ -1111,6 +1154,8 @@ function dropTarget(x, y, pid){
   if(team){
     const slot = findSlot(pid);
     if(slot && team.dataset.court && slot.court.id===+team.dataset.court && slot.ti===+team.dataset.team) return null; // own team
+    const v = team.querySelector('[data-vacant]');
+    if(v) return {type:'vacant', el:v};
     const best = nearestChip(team);
     return best ? {type:'chip', el:best} : null;
   }
@@ -1118,6 +1163,8 @@ function dropTarget(x, y, pid){
   if(court){
     const slot = findSlot(pid);
     if(slot && court.querySelector(`[data-chip="${pid}"]`)) return null; // own court, ambiguous
+    const v = court.querySelector('[data-vacant]');
+    if(v) return {type:'vacant', el:v};
     const best = nearestChip(court);
     return best ? {type:'chip', el:best} : null;
   }
@@ -1153,11 +1200,10 @@ document.addEventListener('pointerup', e=>{
     const t = dropTarget(e.clientX, e.clientY, d.pid);
     if(t){
       if(t.type==='chip'){ trySwap(d.pid, t.el.dataset.chip); }
-      else {
-        const q = prioritySort(queuedPlayers());
-        if(!q.length) toast('No one waiting to sub in');
-        else trySwap(d.pid, q[0].id);
+      else if(t.type==='vacant'){
+        if(placeVacant(d.pid, +t.el.dataset.court, +t.el.dataset.team, +t.el.dataset.pos)){ ui.selected=null; save(); animatedRender(); toast(`${nameOf(d.pid)} is in`); }
       }
+      else if(removeFromCourt(d.pid)){ save(); animatedRender(); toast(`${nameOf(d.pid)} back in queue — slot left open`); }
     }
   } else {
     // tap: select / swap
